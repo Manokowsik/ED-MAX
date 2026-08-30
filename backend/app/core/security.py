@@ -1,26 +1,20 @@
-import os
 from datetime import datetime, timedelta, timezone
 
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
+from app.core.config import ACCESS_TOKEN_EXPIRE_MINUTES, JWT_ALGORITHM, JWT_SECRET_KEY
+
 
 # ============================================================
 # JWT Configuration
 # ============================================================
 
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
-
 if not JWT_SECRET_KEY:
     raise RuntimeError(
         "JWT_SECRET_KEY is not configured in the .env file"
     )
-
-
-JWT_ALGORITHM = "HS256"
-
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
 
 # ============================================================

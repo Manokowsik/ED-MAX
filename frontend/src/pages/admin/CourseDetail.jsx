@@ -20,7 +20,7 @@ function formatDate(iso) {
 // ============================================================
 // Clean, Professional Module Card Component
 // ============================================================
-function ModuleCard({ module, courseId, onRefresh, onError }) {
+function ModuleCard({ module, courseId, onRefresh, onError, isFirst, isLast, onMoveUp, onMoveDown }) {
   const navigate = useNavigate();
   const [confirmDeleteMod, setConfirmDeleteMod] = useState(false);
   const [deletingMod, setDeletingMod] = useState(false);
@@ -44,8 +44,32 @@ function ModuleCard({ module, courseId, onRefresh, onError }) {
 
   return (
     <div className="module-card">
-      <div className="module-card-number">
-        {String(module.module_order).padStart(2, '0')}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+        <div className="module-card-number">
+          {String(module.module_order).padStart(2, '0')}
+        </div>
+        <div style={{ display: 'flex', gap: 2 }}>
+          <button
+            type="button"
+            className="content-reorder-btn"
+            onClick={onMoveUp}
+            disabled={isFirst}
+            title="Move Module Up"
+            style={{ fontSize: '0.75rem', padding: '2px 4px' }}
+          >
+            ▲
+          </button>
+          <button
+            type="button"
+            className="content-reorder-btn"
+            onClick={onMoveDown}
+            disabled={isLast}
+            title="Move Module Down"
+            style={{ fontSize: '0.75rem', padding: '2px 4px' }}
+          >
+            ▼
+          </button>
+        </div>
       </div>
 
       <div className="module-card-body">
@@ -139,7 +163,7 @@ export default function AdminCourseDetail() {
 
   // Edit Course Modal
   const [showEdit, setShowEdit] = useState(false);
-  const [editForm, setEditForm] = useState({ title: '', description: '' });
+  const [editForm, setEditForm] = useState({ title: '', description: '', isActive: true });
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState('');
 
@@ -166,7 +190,7 @@ export default function AdminCourseDetail() {
 
   useEffect(() => {
     if (course && showEdit) {
-      setEditForm({ title: course.title, description: course.description ?? '' });
+      setEditForm({ title: course.title, description: course.description ?? '', isActive: course.is_active ?? true });
     }
   }, [course, showEdit]);
 
@@ -177,7 +201,7 @@ export default function AdminCourseDetail() {
     setSavingEdit(true);
     setEditError('');
     try {
-      await updateCourse(Number(courseId), editForm.title.trim(), editForm.description.trim());
+      await updateCourse(Number(courseId), editForm.title.trim(), editForm.description.trim(), editForm.isActive);
       setShowEdit(false);
       setSuccess('Course details updated successfully.');
       await load();
@@ -185,6 +209,27 @@ export default function AdminCourseDetail() {
       setEditError(err.message || 'Failed to update course.');
     } finally {
       setSavingEdit(false);
+    }
+  }
+
+  async function handleMoveModule(moduleItem, direction) {
+    const sorted = [...(course?.modules ?? [])].sort((a, b) => a.module_order - b.module_order || a.id - b.id);
+    const currIdx = sorted.findIndex((m) => m.id === moduleItem.id);
+    const targetIdx = direction === 'up' ? currIdx - 1 : currIdx + 1;
+    if (targetIdx < 0 || targetIdx >= sorted.length) return;
+
+    const targetItem = sorted[targetIdx];
+    const currOrder = moduleItem.module_order;
+    const targetOrder = targetItem.module_order;
+    const newCurrOrder = targetOrder !== currOrder ? targetOrder : (direction === 'up' ? Math.max(1, currOrder - 1) : currOrder + 1);
+    const newTargetOrder = targetOrder !== currOrder ? currOrder : (direction === 'up' ? currOrder : Math.max(1, currOrder - 1));
+
+    try {
+      await updateModule(moduleItem.id, { moduleOrder: newCurrOrder });
+      await updateModule(targetItem.id, { moduleOrder: newTargetOrder });
+      await load();
+    } catch (err) {
+      setError(err.message || 'Failed to reorder module.');
     }
   }
 
@@ -310,13 +355,17 @@ export default function AdminCourseDetail() {
               />
             ) : (
               <div className="module-card-list">
-                {modules.map((m) => (
+                {modules.map((m, idx) => (
                   <ModuleCard
                     key={m.id}
                     module={m}
                     courseId={course.id}
                     onRefresh={load}
                     onError={setError}
+                    isFirst={idx === 0}
+                    isLast={idx === modules.length - 1}
+                    onMoveUp={() => handleMoveModule(m, 'up')}
+                    onMoveDown={() => handleMoveModule(m, 'down')}
                   />
                 ))}
               </div>
@@ -414,6 +463,19 @@ export default function AdminCourseDetail() {
                   value={editForm.description}
                   onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
                 />
+              </div>
+
+              <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
+                <input
+                  id="edit-c-active"
+                  type="checkbox"
+                  checked={editForm.isActive}
+                  onChange={(e) => setEditForm((f) => ({ ...f, isActive: e.target.checked }))}
+                  style={{ width: 18, height: 18, cursor: 'pointer' }}
+                />
+                <label className="form-label" htmlFor="edit-c-active" style={{ marginBottom: 0, cursor: 'pointer' }}>
+                  Active Course (available for student assignments)
+                </label>
               </div>
             </form>
           </Modal>

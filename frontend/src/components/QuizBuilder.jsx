@@ -296,8 +296,9 @@ export default function QuizBuilder({ moduleId, quiz: existingQuiz, onQuizCreate
             }
           }
 
-          // Handle changed / new options
-          for (const opt of q.options) {
+          // Handle changed / new options (sort so is_correct=true is updated last)
+          const sortedOptions = [...q.options].sort((a, b) => (a.is_correct === b.is_correct ? 0 : a.is_correct ? 1 : -1));
+          for (const opt of sortedOptions) {
             if (opt._persisted) {
               const origOpt = (origQ?.options ?? []).find((oo) => oo.id === opt.id);
               const optChanged = origOpt && (

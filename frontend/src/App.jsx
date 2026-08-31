@@ -5,6 +5,7 @@ import RoleRoute from './components/RoleRoute';
 
 // Pages
 import Login from './pages/Login';
+import Signup from './pages/Signup';
 import NotFound from './pages/NotFound';
 
 // Admin
@@ -14,6 +15,7 @@ import AdminStudentDetail from './pages/admin/StudentDetail';
 import AdminCourses from './pages/admin/Courses';
 import AdminCourseDetail from './pages/admin/CourseDetail';
 import AdminAssignments from './pages/admin/Assignments';
+import ModuleEditor from './pages/instructor/ModuleEditor';
 
 // Student
 import StudentDashboard from './pages/student/Dashboard';
@@ -39,6 +41,7 @@ function AppRoutes() {
 
       {/* Auth */}
       <Route path="/login" element={<Login />} />
+      <Route path="/signup" element={<Signup />} />
 
       {/* =====================================================
           ADMIN ROUTES
@@ -99,6 +102,16 @@ function AppRoutes() {
           <ProtectedRoute>
             <RoleRoute roles={['ADMIN']}>
               <AdminCourseDetail />
+            </RoleRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/courses/:courseId/modules/:moduleId"
+        element={
+          <ProtectedRoute>
+            <RoleRoute roles={['ADMIN']}>
+              <ModuleEditor />
             </RoleRoute>
           </ProtectedRoute>
         }

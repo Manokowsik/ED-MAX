@@ -17,7 +17,7 @@ router = APIRouter(
 
 
 # ============================================================
-# Create Module (Admin only)
+# Create Module (Admin only — org-scoped)
 # ============================================================
 
 @router.post("/{course_id}/modules", status_code=201)
@@ -26,16 +26,18 @@ def create_module(
     module_data: ModuleCreateRequest,
     current_user: dict = Depends(require_admin)
 ):
+    org_id = current_user["organization_id"]
+
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
-        # Verify course exists
+        # Verify course exists and belongs to admin's organization
         cursor.execute(
             """
-            SELECT id FROM courses WHERE id = %s AND is_active = TRUE
+            SELECT id FROM courses WHERE id = %s AND organization_id = %s AND is_active = TRUE
             """,
-            (course_id,)
+            (course_id, org_id)
         )
 
         if not cursor.fetchone():
@@ -44,19 +46,23 @@ def create_module(
                 detail="Course not found or not active"
             )
 
-        # Create module
+        # Create module with new authoring fields
         cursor.execute(
             """
             INSERT INTO course_modules
-            (course_id, title, description, module_order)
-            VALUES (%s, %s, %s, %s)
-            RETURNING id, course_id, title, description, module_order, created_at
+            (course_id, title, description, module_order, objectives, key_takeaways, is_published)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING id, course_id, title, description, module_order,
+                      objectives, key_takeaways, is_published, created_at
             """,
             (
                 course_id,
                 module_data.title.strip(),
                 module_data.description.strip(),
-                module_data.module_order
+                module_data.module_order,
+                module_data.objectives,
+                module_data.key_takeaways,
+                module_data.is_published,
             )
         )
 
@@ -71,7 +77,10 @@ def create_module(
                 "title": module[2],
                 "description": module[3],
                 "module_order": module[4],
-                "created_at": module[5]
+                "objectives": list(module[5]) if module[5] else [],
+                "key_takeaways": list(module[6]) if module[6] else [],
+                "is_published": module[7],
+                "created_at": module[8],
             }
         }
 
@@ -92,7 +101,7 @@ def create_module(
 
 
 # ============================================================
-# Update Module (Admin only)
+# Update Module (Admin only — org-scoped)
 # ============================================================
 
 @router.put("/modules/{module_id}")
@@ -101,10 +110,28 @@ def update_module(
     module_data: ModuleUpdateRequest,
     current_user: dict = Depends(require_admin)
 ):
+    org_id = current_user["organization_id"]
+
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
+        # Verify module belongs to a course in admin's organization
+        cursor.execute(
+            """
+            SELECT cm.id
+            FROM course_modules cm
+            JOIN courses c ON c.id = cm.course_id
+            WHERE cm.id = %s AND c.organization_id = %s
+            """,
+            (module_id, org_id)
+        )
+        if not cursor.fetchone():
+            raise HTTPException(
+                status_code=404,
+                detail="Module not found"
+            )
+
         fields = []
         values = []
 
@@ -117,6 +144,15 @@ def update_module(
         if module_data.module_order is not None:
             fields.append("module_order = %s")
             values.append(module_data.module_order)
+        if module_data.objectives is not None:
+            fields.append("objectives = %s")
+            values.append(module_data.objectives)
+        if module_data.key_takeaways is not None:
+            fields.append("key_takeaways = %s")
+            values.append(module_data.key_takeaways)
+        if module_data.is_published is not None:
+            fields.append("is_published = %s")
+            values.append(module_data.is_published)
 
         if not fields:
             raise HTTPException(
@@ -128,18 +164,17 @@ def update_module(
         values.append(module_id)
 
         cursor.execute(
-            f"UPDATE course_modules SET {', '.join(fields)} WHERE id = %s RETURNING id, course_id, title, description, module_order",
+            f"""
+            UPDATE course_modules
+            SET {', '.join(fields)}
+            WHERE id = %s
+            RETURNING id, course_id, title, description, module_order,
+                      objectives, key_takeaways, is_published, updated_at
+            """,
             tuple(values)
         )
 
         updated = cursor.fetchone()
-
-        if not updated:
-            raise HTTPException(
-                status_code=404,
-                detail="Module not found"
-            )
-
         conn.commit()
 
         return {
@@ -149,7 +184,11 @@ def update_module(
                 "course_id": updated[1],
                 "title": updated[2],
                 "description": updated[3],
-                "module_order": updated[4]
+                "module_order": updated[4],
+                "objectives": list(updated[5]) if updated[5] else [],
+                "key_takeaways": list(updated[6]) if updated[6] else [],
+                "is_published": updated[7],
+                "updated_at": updated[8],
             }
         }
 
@@ -170,7 +209,7 @@ def update_module(
 
 
 # ============================================================
-# Delete Module (Admin only)
+# Delete Module (Admin only — org-scoped)
 # ============================================================
 
 @router.delete("/modules/{module_id}")
@@ -178,10 +217,28 @@ def delete_module(
     module_id: int,
     current_user: dict = Depends(require_admin)
 ):
+    org_id = current_user["organization_id"]
+
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
+        # Verify module belongs to a course in admin's organization
+        cursor.execute(
+            """
+            SELECT cm.id
+            FROM course_modules cm
+            JOIN courses c ON c.id = cm.course_id
+            WHERE cm.id = %s AND c.organization_id = %s
+            """,
+            (module_id, org_id)
+        )
+        if not cursor.fetchone():
+            raise HTTPException(
+                status_code=404,
+                detail="Module not found"
+            )
+
         # Check for dependent training contents
         cursor.execute(
             "SELECT COUNT(*) FROM training_contents WHERE module_id = %s",
@@ -209,12 +266,6 @@ def delete_module(
             (module_id,)
         )
 
-        if cursor.rowcount == 0:
-            raise HTTPException(
-                status_code=404,
-                detail="Module not found"
-            )
-
         conn.commit()
 
         return {"message": "Module deleted successfully"}
@@ -236,7 +287,7 @@ def delete_module(
 
 
 # ============================================================
-# Create Training Content (Admin only)
+# Create Training Content (Admin only — org-scoped)
 # ============================================================
 
 @router.post("/modules/{module_id}/content", status_code=201)
@@ -245,14 +296,21 @@ def create_training_content(
     content_data: ContentCreateRequest,
     current_user: dict = Depends(require_admin)
 ):
+    org_id = current_user["organization_id"]
+
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
-        # Verify module exists
+        # Verify module exists and belongs to a course in admin's organization
         cursor.execute(
-            "SELECT id FROM course_modules WHERE id = %s",
-            (module_id,)
+            """
+            SELECT cm.id
+            FROM course_modules cm
+            JOIN courses c ON c.id = cm.course_id
+            WHERE cm.id = %s AND c.organization_id = %s
+            """,
+            (module_id, org_id)
         )
         if not cursor.fetchone():
             raise HTTPException(
@@ -268,17 +326,18 @@ def create_training_content(
                 detail="content_type must be TEXT or VIDEO"
             )
 
-        # Create content
+        # Create content with title
         cursor.execute(
             """
             INSERT INTO training_contents
-            (module_id, content_type, content, content_order)
-            VALUES (%s, %s, %s, %s)
-            RETURNING id, module_id, content_type, content, content_order, created_at
+            (module_id, content_type, title, content, content_order)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id, module_id, content_type, title, content, content_order, created_at
             """,
             (
                 module_id,
                 content_type,
+                (content_data.title or "").strip(),
                 content_data.content,
                 content_data.content_order
             )
@@ -293,9 +352,10 @@ def create_training_content(
                 "id": training_content[0],
                 "module_id": training_content[1],
                 "content_type": training_content[2],
-                "content": training_content[3],
-                "content_order": training_content[4],
-                "created_at": training_content[5]
+                "title": training_content[3],
+                "content": training_content[4],
+                "content_order": training_content[5],
+                "created_at": training_content[6]
             }
         }
 
@@ -316,7 +376,7 @@ def create_training_content(
 
 
 # ============================================================
-# Update Training Content (Admin only)
+# Update Training Content (Admin only — org-scoped)
 # ============================================================
 
 @router.put("/modules/{module_id}/content/{content_id}")
@@ -326,17 +386,22 @@ def update_training_content(
     content_data: ContentUpdateRequest,
     current_user: dict = Depends(require_admin)
 ):
+    org_id = current_user["organization_id"]
+
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
-        # Verify content belongs to module
+        # Verify content belongs to module and module belongs to admin's organization
         cursor.execute(
             """
-            SELECT id FROM training_contents
-            WHERE id = %s AND module_id = %s
+            SELECT tc.id
+            FROM training_contents tc
+            JOIN course_modules cm ON cm.id = tc.module_id
+            JOIN courses c ON c.id = cm.course_id
+            WHERE tc.id = %s AND tc.module_id = %s AND c.organization_id = %s
             """,
-            (content_id, module_id)
+            (content_id, module_id, org_id)
         )
         if not cursor.fetchone():
             raise HTTPException(
@@ -356,6 +421,9 @@ def update_training_content(
                 )
             fields.append("content_type = %s")
             values.append(ct)
+        if content_data.title is not None:
+            fields.append("title = %s")
+            values.append(content_data.title.strip())
         if content_data.content is not None:
             fields.append("content = %s")
             values.append(content_data.content)
@@ -397,7 +465,7 @@ def update_training_content(
 
 
 # ============================================================
-# Delete Training Content (Admin only)
+# Delete Training Content (Admin only — org-scoped)
 # ============================================================
 
 @router.delete("/modules/{module_id}/content/{content_id}")
@@ -406,10 +474,29 @@ def delete_training_content(
     content_id: int,
     current_user: dict = Depends(require_admin)
 ):
+    org_id = current_user["organization_id"]
+
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
+        # Verify content belongs to module and module belongs to admin's organization
+        cursor.execute(
+            """
+            SELECT tc.id
+            FROM training_contents tc
+            JOIN course_modules cm ON cm.id = tc.module_id
+            JOIN courses c ON c.id = cm.course_id
+            WHERE tc.id = %s AND tc.module_id = %s AND c.organization_id = %s
+            """,
+            (content_id, module_id, org_id)
+        )
+        if not cursor.fetchone():
+            raise HTTPException(
+                status_code=404,
+                detail="Training content not found for this module"
+            )
+
         cursor.execute(
             """
             DELETE FROM training_contents
@@ -417,12 +504,6 @@ def delete_training_content(
             """,
             (content_id, module_id)
         )
-
-        if cursor.rowcount == 0:
-            raise HTTPException(
-                status_code=404,
-                detail="Training content not found for this module"
-            )
 
         conn.commit()
 
@@ -446,12 +527,6 @@ def delete_training_content(
 
 # ============================================================
 # Complete Module (Student only — own progress only)
-#
-# ENFORCEMENT: If the module has a quiz, the student MUST have
-# at least one PASSING attempt for that quiz before this module
-# can be marked complete. Failed attempts do NOT complete the
-# module. Another student cannot manipulate this endpoint
-# because student_id is always sourced from the JWT token.
 # ============================================================
 
 @router.post("/modules/{module_id}/complete")
@@ -499,9 +574,7 @@ def complete_module(
             )
 
         # --------------------------------------------------------
-        # QUIZ PASS ENFORCEMENT (Requirement 13)
-        # If the module has a quiz, the student must have at least
-        # one PASSING attempt for that quiz before completing.
+        # QUIZ PASS ENFORCEMENT
         # --------------------------------------------------------
         cursor.execute(
             """

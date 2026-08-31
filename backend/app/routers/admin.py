@@ -19,36 +19,63 @@ password_hash = PasswordHash.recommended()
 # Admin Dashboard (Admin only)
 # Requirement 4: overview of courses, users, assignments,
 #                progress, quiz results, completion status
+#
+# ALL queries scoped by organization_id
 # ============================================================
 
 @router.get("/dashboard")
 def get_admin_dashboard(
     current_user: dict = Depends(require_admin)
 ):
+    org_id = current_user["organization_id"]
+
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
-        # ---- Overall totals ----
+        # ---- Overall totals (org-scoped) ----
         cursor.execute(
             """
             SELECT
-                (SELECT COUNT(*) FROM courses)                              AS total_courses,
-                (SELECT COUNT(*) FROM courses WHERE is_active = TRUE)       AS active_courses,
-                (SELECT COUNT(*) FROM users WHERE LOWER(role) = 'student') AS total_students,
-                (SELECT COUNT(*) FROM users WHERE LOWER(role) = 'student'
-                    AND is_active = TRUE)                                   AS active_students,
-                (SELECT COUNT(*) FROM enrollments)                          AS total_enrollments,
-                (SELECT COUNT(*) FROM enrollments
-                    WHERE status = 'COMPLETED')                             AS completed_enrollments,
-                (SELECT COUNT(*) FROM quiz_attempts)                        AS total_quiz_attempts,
-                (SELECT COUNT(*) FROM quiz_attempts WHERE passed = TRUE)    AS passed_quiz_attempts,
-                (SELECT COUNT(*) FROM certificates)                         AS total_certificates
-            """
+                (SELECT COUNT(*) FROM courses
+                    WHERE organization_id = %s)                             AS total_courses,
+                (SELECT COUNT(*) FROM courses
+                    WHERE is_active = TRUE AND organization_id = %s)        AS active_courses,
+                (SELECT COUNT(*) FROM users
+                    WHERE LOWER(role) = 'student'
+                    AND organization_id = %s)                               AS total_students,
+                (SELECT COUNT(*) FROM users
+                    WHERE LOWER(role) = 'student'
+                    AND is_active = TRUE
+                    AND organization_id = %s)                               AS active_students,
+                (SELECT COUNT(*) FROM enrollments e
+                    JOIN courses c ON c.id = e.course_id
+                    WHERE c.organization_id = %s)                           AS total_enrollments,
+                (SELECT COUNT(*) FROM enrollments e
+                    JOIN courses c ON c.id = e.course_id
+                    WHERE e.status = 'COMPLETED'
+                    AND c.organization_id = %s)                             AS completed_enrollments,
+                (SELECT COUNT(*) FROM quiz_attempts qa
+                    JOIN quizzes q ON q.id = qa.quiz_id
+                    JOIN course_modules cm ON cm.id = q.module_id
+                    JOIN courses c ON c.id = cm.course_id
+                    WHERE c.organization_id = %s)                           AS total_quiz_attempts,
+                (SELECT COUNT(*) FROM quiz_attempts qa
+                    JOIN quizzes q ON q.id = qa.quiz_id
+                    JOIN course_modules cm ON cm.id = q.module_id
+                    JOIN courses c ON c.id = cm.course_id
+                    WHERE qa.passed = TRUE
+                    AND c.organization_id = %s)                             AS passed_quiz_attempts,
+                (SELECT COUNT(*) FROM certificates cert
+                    JOIN courses c ON c.id = cert.course_id
+                    WHERE c.organization_id = %s)                           AS total_certificates
+            """,
+            (org_id, org_id, org_id, org_id, org_id,
+             org_id, org_id, org_id, org_id)
         )
         totals = cursor.fetchone()
 
-        # ---- Per-course stats ----
+        # ---- Per-course stats (org-scoped) ----
         cursor.execute(
             """
             SELECT
@@ -80,13 +107,15 @@ def get_admin_dashboard(
                     ON mp.module_id = cm2.id AND mp.student_id = e.student_id
                 WHERE cm2.course_id = c.id
             ) AS module_counts ON e.student_id IS NOT NULL
+            WHERE c.organization_id = %s
             GROUP BY c.id, c.title, c.is_active
             ORDER BY c.id
-            """
+            """,
+            (org_id,)
         )
         courses = cursor.fetchall()
 
-        # ---- Recent quiz attempts (last 20) ----
+        # ---- Recent quiz attempts (last 20, org-scoped) ----
         cursor.execute(
             """
             SELECT
@@ -99,10 +128,14 @@ def get_admin_dashboard(
                 qa.attempted_at
             FROM quiz_attempts qa
             JOIN quizzes q ON q.id = qa.quiz_id
+            JOIN course_modules cm ON cm.id = q.module_id
+            JOIN courses c ON c.id = cm.course_id
             JOIN users u ON u.id = qa.student_id
+            WHERE c.organization_id = %s
             ORDER BY qa.attempted_at DESC
             LIMIT 20
-            """
+            """,
+            (org_id,)
         )
         recent_attempts = cursor.fetchall()
 
@@ -156,7 +189,7 @@ def get_admin_dashboard(
 
 
 # ============================================================
-# Create Student
+# Create Student (scoped to admin's organization)
 # ============================================================
 
 @router.post("/students")
@@ -164,6 +197,7 @@ def create_student(
     student_data: CreateStudentRequest,
     current_user: dict = Depends(require_admin)
 ):
+    org_id = current_user["organization_id"]
 
     conn = get_connection()
     cursor = conn.cursor()
@@ -201,7 +235,7 @@ def create_student(
 
 
         # ----------------------------------------------------
-        # Create Student
+        # Create Student (bound to admin's organization)
         # ----------------------------------------------------
 
         cursor.execute(
@@ -212,7 +246,8 @@ def create_student(
                 email,
                 password_hash,
                 role,
-                is_active
+                is_active,
+                organization_id
             )
             VALUES
             (
@@ -220,7 +255,8 @@ def create_student(
                 %s,
                 %s,
                 'STUDENT',
-                TRUE
+                TRUE,
+                %s
             )
             RETURNING
                 id,
@@ -232,7 +268,8 @@ def create_student(
             (
                 student_data.name,
                 student_data.email,
-                hashed_password
+                hashed_password,
+                org_id
             )
         )
 
@@ -277,13 +314,14 @@ def create_student(
 
 
 # ============================================================
-# Get Students
+# Get Students (org-scoped)
 # ============================================================
 
 @router.get("/students")
 def get_students(
     current_user: dict = Depends(require_admin)
 ):
+    org_id = current_user["organization_id"]
 
     conn = get_connection()
     cursor = conn.cursor()
@@ -300,8 +338,10 @@ def get_students(
                 is_active
             FROM users
             WHERE LOWER(role) = 'student'
+            AND organization_id = %s
             ORDER BY id
-            """
+            """,
+            (org_id,)
         )
 
         students = cursor.fetchall()
@@ -334,7 +374,7 @@ def get_students(
 
 
 # ============================================================
-# Get Student Assigned Courses
+# Get Student Assigned Courses (org-scoped)
 # ============================================================
 
 @router.get("/students/{student_id}/courses")
@@ -342,6 +382,7 @@ def get_student_assigned_courses(
     student_id: int,
     current_user: dict = Depends(require_admin)
 ):
+    org_id = current_user["organization_id"]
 
     conn = get_connection()
     cursor = conn.cursor()
@@ -349,7 +390,7 @@ def get_student_assigned_courses(
     try:
 
         # ----------------------------------------------------
-        # Check Student
+        # Check Student belongs to this admin's org
         # ----------------------------------------------------
 
         cursor.execute(
@@ -361,8 +402,9 @@ def get_student_assigned_courses(
             FROM users
             WHERE id = %s
             AND LOWER(role) = 'student'
+            AND organization_id = %s
             """,
-            (student_id,)
+            (student_id, org_id)
         )
 
         student = cursor.fetchone()
@@ -440,7 +482,7 @@ def get_student_assigned_courses(
 
 
 # ============================================================
-# Activate Student
+# Activate Student (org-scoped)
 # ============================================================
 
 @router.patch("/students/{student_id}/activate")
@@ -448,6 +490,7 @@ def activate_student(
     student_id: int,
     current_user: dict = Depends(require_admin)
 ):
+    org_id = current_user["organization_id"]
 
     conn = get_connection()
     cursor = conn.cursor()
@@ -460,9 +503,10 @@ def activate_student(
             SET is_active = TRUE
             WHERE id = %s
             AND LOWER(role) = 'student'
+            AND organization_id = %s
             RETURNING id, name, email, is_active
             """,
-            (student_id,)
+            (student_id, org_id)
         )
 
         student = cursor.fetchone()
@@ -514,7 +558,7 @@ def activate_student(
 
 
 # ============================================================
-# Deactivate Student
+# Deactivate Student (org-scoped)
 # ============================================================
 
 @router.patch("/students/{student_id}/deactivate")
@@ -522,6 +566,7 @@ def deactivate_student(
     student_id: int,
     current_user: dict = Depends(require_admin)
 ):
+    org_id = current_user["organization_id"]
 
     conn = get_connection()
     cursor = conn.cursor()
@@ -534,9 +579,10 @@ def deactivate_student(
             SET is_active = FALSE
             WHERE id = %s
             AND LOWER(role) = 'student'
+            AND organization_id = %s
             RETURNING id, name, email, is_active
             """,
-            (student_id,)
+            (student_id, org_id)
         )
 
         student = cursor.fetchone()

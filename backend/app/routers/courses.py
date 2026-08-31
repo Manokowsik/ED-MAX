@@ -12,7 +12,7 @@ router = APIRouter(
 
 
 # ============================================================
-# Create Course (Admin only)
+# Create Course (Admin only — bound to admin's organization)
 # ============================================================
 
 @router.post("/", status_code=201)
@@ -20,6 +20,8 @@ def create_course(
     course_data: CourseCreateRequest,
     current_user: dict = Depends(require_admin)
 ):
+    org_id = current_user["organization_id"]
+
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -27,14 +29,15 @@ def create_course(
         cursor.execute(
             """
             INSERT INTO courses
-            (title, description, created_by, is_active)
-            VALUES (%s, %s, %s, TRUE)
+            (title, description, created_by, organization_id, is_active)
+            VALUES (%s, %s, %s, %s, TRUE)
             RETURNING id, title, description, created_by, is_active, created_at
             """,
             (
                 course_data.title.strip(),
                 course_data.description.strip(),
-                current_user["id"]
+                current_user["id"],
+                org_id
             )
         )
 
@@ -66,13 +69,15 @@ def create_course(
 
 
 # ============================================================
-# Get All Courses (Admin only)
+# Get All Courses (Admin only — org-scoped)
 # ============================================================
 
 @router.get("/")
 def get_courses(
     current_user: dict = Depends(require_admin)
 ):
+    org_id = current_user["organization_id"]
+
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -86,8 +91,10 @@ def get_courses(
                 is_active,
                 created_at
             FROM courses
+            WHERE organization_id = %s
             ORDER BY id
-            """
+            """,
+            (org_id,)
         )
 
         courses = cursor.fetchall()
@@ -239,13 +246,14 @@ def get_student_course(
                 detail="Course not found or not assigned to this student"
             )
 
-        # Get modules with content and quizzes (no is_correct for student)
+        # Get PUBLISHED modules only with content and quizzes (no is_correct for student)
         cursor.execute(
             """
             SELECT
-                id, title, description, module_order, created_at, updated_at
+                id, title, description, module_order, created_at, updated_at,
+                objectives, key_takeaways
             FROM course_modules
-            WHERE course_id = %s
+            WHERE course_id = %s AND is_published = TRUE
             ORDER BY module_order, id
             """,
             (course_id,)
@@ -257,10 +265,10 @@ def get_student_course(
         for module in modules:
             module_id = module[0]
 
-            # Training content
+            # Training content — include title
             cursor.execute(
                 """
-                SELECT id, content_type, content, content_order, created_at
+                SELECT id, content_type, title, content, content_order, created_at
                 FROM training_contents
                 WHERE module_id = %s
                 ORDER BY content_order, id
@@ -360,15 +368,18 @@ def get_student_course(
                 "module_order": module[3],
                 "created_at": module[4],
                 "updated_at": module[5],
+                "objectives": list(module[6]) if module[6] else [],
+                "key_takeaways": list(module[7]) if module[7] else [],
                 "completed": progress[0] if progress else False,
                 "completed_at": progress[1] if progress else None,
                 "contents": [
                     {
                         "id": c[0],
                         "content_type": c[1],
-                        "content": c[2],
-                        "content_order": c[3],
-                        "created_at": c[4]
+                        "title": c[2],
+                        "content": c[3],
+                        "content_order": c[4],
+                        "created_at": c[5]
                     }
                     for c in contents
                 ],
@@ -394,7 +405,7 @@ def get_student_course(
 
 
 # ============================================================
-# Get Complete Course Details (Admin only)
+# Get Complete Course Details (Admin only — org-scoped)
 # ============================================================
 
 @router.get("/{course_id}")
@@ -402,6 +413,8 @@ def get_course(
     course_id: int,
     current_user: dict = Depends(require_admin)
 ):
+    org_id = current_user["organization_id"]
+
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -413,9 +426,9 @@ def get_course(
                 id, title, description, created_by,
                 is_active, created_at, updated_at
             FROM courses
-            WHERE id = %s
+            WHERE id = %s AND organization_id = %s
             """,
-            (course_id,)
+            (course_id, org_id)
         )
 
         course = cursor.fetchone()
@@ -426,11 +439,12 @@ def get_course(
                 detail="Course not found"
             )
 
-        # Modules
+        # Modules — include new authoring fields
         cursor.execute(
             """
             SELECT
-                id, title, description, module_order, created_at, updated_at
+                id, title, description, module_order, created_at, updated_at,
+                is_published, objectives, key_takeaways
             FROM course_modules
             WHERE course_id = %s
             ORDER BY module_order, id
@@ -444,10 +458,10 @@ def get_course(
         for module in modules:
             module_id = module[0]
 
-            # Training Content
+            # Training Content — include title
             cursor.execute(
                 """
-                SELECT id, content_type, content, content_order, created_at
+                SELECT id, content_type, title, content, content_order, created_at
                 FROM training_contents
                 WHERE module_id = %s
                 ORDER BY content_order, id
@@ -460,9 +474,10 @@ def get_course(
                 {
                     "id": c[0],
                     "content_type": c[1],
-                    "content": c[2],
-                    "content_order": c[3],
-                    "created_at": c[4]
+                    "title": c[2],
+                    "content": c[3],
+                    "content_order": c[4],
+                    "created_at": c[5]
                 }
                 for c in contents
             ]
@@ -542,6 +557,9 @@ def get_course(
                 "module_order": module[3],
                 "created_at": module[4],
                 "updated_at": module[5],
+                "is_published": module[6],
+                "objectives": list(module[7]) if module[7] else [],
+                "key_takeaways": list(module[8]) if module[8] else [],
                 "contents": content_list,
                 "quizzes": quiz_list
             })
@@ -593,7 +611,7 @@ def get_course(
 
 
 # ============================================================
-# Course Progress (Admin only)
+# Course Progress (Admin only — org-scoped)
 # ============================================================
 
 @router.get("/{course_id}/progress")
@@ -601,6 +619,8 @@ def get_course_progress(
     course_id: int,
     current_user: dict = Depends(require_admin)
 ):
+    org_id = current_user["organization_id"]
+
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -609,9 +629,9 @@ def get_course_progress(
             """
             SELECT id, title, description, is_active
             FROM courses
-            WHERE id = %s
+            WHERE id = %s AND organization_id = %s
             """,
-            (course_id,)
+            (course_id, org_id)
         )
         course = cursor.fetchone()
 
@@ -693,7 +713,7 @@ def get_course_progress(
 
 
 # ============================================================
-# Update Course (Admin only)
+# Update Course (Admin only — org-scoped)
 # ============================================================
 
 @router.put("/{course_id}")
@@ -702,6 +722,8 @@ def update_course(
     course_data: CourseUpdateRequest,
     current_user: dict = Depends(require_admin)
 ):
+    org_id = current_user["organization_id"]
+
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -726,10 +748,10 @@ def update_course(
             )
 
         fields.append("updated_at = CURRENT_TIMESTAMP")
-        values.append(course_id)
+        values.extend([course_id, org_id])
 
         cursor.execute(
-            f"UPDATE courses SET {', '.join(fields)} WHERE id = %s RETURNING id, title, description, is_active",
+            f"UPDATE courses SET {', '.join(fields)} WHERE id = %s AND organization_id = %s RETURNING id, title, description, is_active",
             tuple(values)
         )
 
@@ -770,7 +792,7 @@ def update_course(
 
 
 # ============================================================
-# Activate Course (Admin only)
+# Activate Course (Admin only — org-scoped)
 # ============================================================
 
 @router.patch("/{course_id}/activate")
@@ -778,6 +800,8 @@ def activate_course(
     course_id: int,
     current_user: dict = Depends(require_admin)
 ):
+    org_id = current_user["organization_id"]
+
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -786,10 +810,10 @@ def activate_course(
             """
             UPDATE courses
             SET is_active = TRUE, updated_at = CURRENT_TIMESTAMP
-            WHERE id = %s
+            WHERE id = %s AND organization_id = %s
             RETURNING id, title, is_active
             """,
-            (course_id,)
+            (course_id, org_id)
         )
         course = cursor.fetchone()
 
@@ -827,7 +851,7 @@ def activate_course(
 
 
 # ============================================================
-# Deactivate Course (Admin only)
+# Deactivate Course (Admin only — org-scoped)
 # ============================================================
 
 @router.patch("/{course_id}/deactivate")
@@ -835,6 +859,8 @@ def deactivate_course(
     course_id: int,
     current_user: dict = Depends(require_admin)
 ):
+    org_id = current_user["organization_id"]
+
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -843,10 +869,10 @@ def deactivate_course(
             """
             UPDATE courses
             SET is_active = FALSE, updated_at = CURRENT_TIMESTAMP
-            WHERE id = %s
+            WHERE id = %s AND organization_id = %s
             RETURNING id, title, is_active
             """,
-            (course_id,)
+            (course_id, org_id)
         )
         course = cursor.fetchone()
 
@@ -884,7 +910,7 @@ def deactivate_course(
 
 
 # ============================================================
-# Assign Course to Student (Admin only)
+# Assign Course to Student (Admin only — org-scoped)
 # ============================================================
 
 @router.post("/{course_id}/assign", status_code=201)
@@ -893,14 +919,16 @@ def assign_course(
     assign_data: AssignCourseRequest,
     current_user: dict = Depends(require_admin)
 ):
+    org_id = current_user["organization_id"]
+
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
-        # Verify course exists and is active
+        # Verify course exists, is active, and belongs to admin's organization
         cursor.execute(
-            "SELECT id FROM courses WHERE id = %s AND is_active = TRUE",
-            (course_id,)
+            "SELECT id FROM courses WHERE id = %s AND organization_id = %s AND is_active = TRUE",
+            (course_id, org_id)
         )
         if not cursor.fetchone():
             raise HTTPException(
@@ -908,13 +936,13 @@ def assign_course(
                 detail="Course not found or not active"
             )
 
-        # Verify student exists and is active
+        # Verify student exists, is active, and belongs to admin's organization
         cursor.execute(
             """
             SELECT id FROM users
-            WHERE id = %s AND LOWER(role) = 'student' AND is_active = TRUE
+            WHERE id = %s AND organization_id = %s AND LOWER(role) = 'student' AND is_active = TRUE
             """,
-            (assign_data.student_id,)
+            (assign_data.student_id, org_id)
         )
         if not cursor.fetchone():
             raise HTTPException(
@@ -976,7 +1004,7 @@ def assign_course(
 
 
 # ============================================================
-# Remove Course Assignment (Admin only)
+# Remove Course Assignment (Admin only — org-scoped)
 # ============================================================
 
 @router.delete("/{course_id}/assign/{student_id}", status_code=200)
@@ -985,10 +1013,23 @@ def unassign_course(
     student_id: int,
     current_user: dict = Depends(require_admin)
 ):
+    org_id = current_user["organization_id"]
+
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
+        # Verify course belongs to admin's org
+        cursor.execute(
+            "SELECT id FROM courses WHERE id = %s AND organization_id = %s",
+            (course_id, org_id)
+        )
+        if not cursor.fetchone():
+            raise HTTPException(
+                status_code=404,
+                detail="Course not found"
+            )
+
         cursor.execute(
             """
             DELETE FROM enrollments

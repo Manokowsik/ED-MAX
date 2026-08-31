@@ -150,6 +150,25 @@ def get_student_dashboard(
         )
         courses = cursor.fetchall()
 
+        # Recent quiz attempts for this student (last 10)
+        cursor.execute(
+            """
+            SELECT
+                qa.id,
+                q.title AS quiz_title,
+                qa.score,
+                qa.passed,
+                qa.attempted_at
+            FROM quiz_attempts qa
+            JOIN quizzes q ON q.id = qa.quiz_id
+            WHERE qa.student_id = %s
+            ORDER BY qa.attempted_at DESC
+            LIMIT 10
+            """,
+            (student_id,)
+        )
+        recent_attempts = cursor.fetchall()
+
         return {
             "student": {
                 "id": student[0],
@@ -177,6 +196,16 @@ def get_student_dashboard(
                     "progress_percentage": int(c[8])
                 }
                 for c in courses
+            ],
+            "recent_quiz_attempts": [
+                {
+                    "attempt_id": a[0],
+                    "quiz_title": a[1],
+                    "score": a[2],
+                    "passed": a[3],
+                    "attempted_at": a[4]
+                }
+                for a in recent_attempts
             ]
         }
 

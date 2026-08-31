@@ -13,6 +13,65 @@ router = APIRouter(
 
 
 # ============================================================
+# Verify Certificate by Number (Public — no auth required)
+# ============================================================
+
+@router.get("/verify/{certificate_number}")
+def verify_certificate(certificate_number: str):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute(
+            """
+            SELECT
+                c.id,
+                c.certificate_number,
+                c.final_score,
+                c.issued_at,
+                u.name AS student_name,
+                co.title AS course_title
+            FROM certificates c
+            JOIN users u ON u.id = c.student_id
+            JOIN courses co ON co.id = c.course_id
+            WHERE c.certificate_number = %s
+            """,
+            (certificate_number.upper(),)
+        )
+        certificate = cursor.fetchone()
+
+        if not certificate:
+            raise HTTPException(
+                status_code=404,
+                detail="Certificate not found. This certificate number is not valid."
+            )
+
+        return {
+            "valid": True,
+            "certificate": {
+                "certificate_number": certificate[1],
+                "student_name": certificate[4],
+                "course_title": certificate[5],
+                "final_score": certificate[2],
+                "issued_at": certificate[3]
+            }
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to verify certificate"
+        )
+
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# ============================================================
 # Generate Certificate (Student only — own certificate only)
 # ============================================================
 
@@ -30,7 +89,7 @@ def generate_certificate(
         # Verify student exists and is active
         cursor.execute(
             """
-            SELECT id, name
+            SELECT id, name, email
             FROM users
             WHERE id = %s AND role = 'STUDENT' AND is_active = TRUE
             """,
@@ -116,6 +175,7 @@ def generate_certificate(
                     "id": existing[0],
                     "certificate_number": existing[1],
                     "student_name": student[1],
+                    "student_email": student[2],
                     "course_title": course[1],
                     "final_score": existing[2],
                     "issued_at": existing[3]
@@ -168,6 +228,7 @@ def generate_certificate(
                 "id": certificate[0],
                 "certificate_number": certificate[1],
                 "student_name": student[1],
+                "student_email": student[2],
                 "course_title": course[1],
                 "final_score": certificate[2],
                 "issued_at": certificate[3]
@@ -212,7 +273,9 @@ def get_certificate(
                 c.issued_at,
                 c.student_id,
                 u.name AS student_name,
-                co.title AS course_title
+                co.title AS course_title,
+                u.email AS student_email,
+                co.organization_id
             FROM certificates c
             JOIN users u ON u.id = c.student_id
             JOIN courses co ON co.id = c.course_id
@@ -238,11 +301,22 @@ def get_certificate(
                 detail="Access denied"
             )
 
+        # Admins can only see certificates belonging to their organization
+        if (
+            current_user["role"].upper() == "ADMIN"
+            and current_user["organization_id"] != certificate[8]
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied"
+            )
+
         return {
             "certificate": {
                 "id": certificate[0],
                 "certificate_number": certificate[1],
                 "student_name": certificate[5],
+                "student_email": certificate[7],
                 "course_title": certificate[6],
                 "final_score": certificate[2],
                 "issued_at": certificate[3]
@@ -264,7 +338,7 @@ def get_certificate(
 
 
 # ============================================================
-# Get Student Certificates (Student: own only, Admin: any)
+# Get Student Certificates (Student: own only, Admin: own org students)
 # ============================================================
 
 @router.get("/student/{student_id}")
@@ -286,6 +360,19 @@ def get_student_certificates(
     cursor = conn.cursor()
 
     try:
+        # If Admin, check if student belongs to admin's organization
+        if current_user["role"].upper() == "ADMIN":
+            cursor.execute(
+                "SELECT organization_id FROM users WHERE id = %s AND LOWER(role) = 'student'",
+                (student_id,)
+            )
+            student_row = cursor.fetchone()
+            if not student_row or student_row[0] != current_user["organization_id"]:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Access denied"
+                )
+
         cursor.execute(
             """
             SELECT
@@ -294,9 +381,12 @@ def get_student_certificates(
                 cert.final_score,
                 cert.issued_at,
                 co.id AS course_id,
-                co.title AS course_title
+                co.title AS course_title,
+                u.name AS student_name,
+                u.email AS student_email
             FROM certificates cert
             JOIN courses co ON co.id = cert.course_id
+            JOIN users u ON u.id = cert.student_id
             WHERE cert.student_id = %s
             ORDER BY cert.issued_at DESC
             """,
@@ -313,7 +403,9 @@ def get_student_certificates(
                     "final_score": c[2],
                     "issued_at": c[3],
                     "course_id": c[4],
-                    "course_title": c[5]
+                    "course_title": c[5],
+                    "student_name": c[6],
+                    "student_email": c[7]
                 }
                 for c in certificates
             ]

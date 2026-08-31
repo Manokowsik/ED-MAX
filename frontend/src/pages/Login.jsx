@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { login } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { Alert, Spinner } from '../components/ui';
@@ -11,10 +11,14 @@ export default function Login() {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [error, setError] = useState(() => sessionStorage.getItem('auth_error') || '');
   const [loading, setLoading] = useState(false);
 
   const from = location.state?.from?.pathname;
+
+  if (error) {
+    sessionStorage.removeItem('auth_error');
+  }
 
   async function handleLogin(e) {
     e.preventDefault();
@@ -113,6 +117,10 @@ export default function Login() {
         <p style={styles.footer}>
           Your credentials are provided by your administrator.
         </p>
+        <p style={styles.signupLink}>
+          Need an admin account?{' '}
+          <Link to="/signup" style={{ color: 'var(--primary)', fontWeight: 600 }}>Sign up</Link>
+        </p>
       </div>
     </div>
   );
@@ -160,5 +168,11 @@ const styles = {
     textAlign: 'center',
     fontSize: '0.75rem',
     color: 'var(--gray-400)',
+  },
+  signupLink: {
+    marginTop: '0.75rem',
+    textAlign: 'center',
+    fontSize: '0.8125rem',
+    color: 'var(--gray-500)',
   },
 };

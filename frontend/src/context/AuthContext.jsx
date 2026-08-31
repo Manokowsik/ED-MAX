@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, useCallback } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import { scheduleAccessTokenRefresh, clearAuthState } from '../services/api';
 
 const AuthContext = createContext(null);
 
@@ -25,26 +26,26 @@ export function AuthProvider({ children }) {
   const [token, setToken] = useState(persisted.token);
   const [user, setUser] = useState(persisted.user);
 
-  /**
-   * Called after a successful login.
-   * Stores token + user in state and localStorage.
-   */
   const loginSuccess = useCallback((accessToken, userData) => {
     localStorage.setItem('access_token', accessToken);
     localStorage.setItem('user', JSON.stringify(userData));
     setToken(accessToken);
     setUser(userData);
+    scheduleAccessTokenRefresh();
   }, []);
 
-  /**
-   * Clears all auth state.
-   */
   const logout = useCallback(() => {
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('user');
+    clearAuthState('');
+    sessionStorage.removeItem('auth_error');
     setToken(null);
     setUser(null);
   }, []);
+
+  useEffect(() => {
+    if (token) {
+      scheduleAccessTokenRefresh();
+    }
+  }, [token]);
 
   const value = {
     token,

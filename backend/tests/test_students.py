@@ -105,11 +105,11 @@ class TestStudentActivation:
         suffix = uuid.uuid4().hex[:8]
         result = db_execute(
             """
-            INSERT INTO users (name, email, password_hash, role, is_active)
-            VALUES (%s, %s, 'hash', 'STUDENT', TRUE)
+            INSERT INTO users (name, email, password_hash, role, is_active, organization_id)
+            VALUES (%s, %s, 'hash', 'STUDENT', TRUE, %s)
             RETURNING id
             """,
-            (f"Temp {suffix}", f"temp_{suffix}@example.com"),
+            (f"Temp {suffix}", f"temp_{suffix}@example.com", admin_user["organization_id"]),
             fetch=True
         )
         student_id = result[0][0]

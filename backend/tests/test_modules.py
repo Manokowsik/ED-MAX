@@ -33,8 +33,32 @@ class TestModuleCreation:
         data = response.json()
         assert data["module"]["course_id"] == test_course["id"]
         assert data["module"]["title"] == "Module A"
+        assert data["module"]["is_published"] is False
         # Cleanup
         db_execute("DELETE FROM course_modules WHERE id = %s", (data["module"]["id"],))
+
+    def test_create_module_with_authoring_fields(self, client, admin_user, test_course):
+        """Admin can create a module with objectives, key takeaways, and published status."""
+        response = client.post(
+            f"/courses/{test_course['id']}/modules",
+            json={
+                "title": "Control Flow Module",
+                "description": "Learn if/else and loops",
+                "module_order": 2,
+                "objectives": ["Understand condition evaluation", "Apply loops"],
+                "key_takeaways": ["If statements check booleans"],
+                "is_published": True
+            },
+            headers=admin_user["headers"]
+        )
+        assert response.status_code == 201
+        data = response.json()["module"]
+        assert data["title"] == "Control Flow Module"
+        assert data["objectives"] == ["Understand condition evaluation", "Apply loops"]
+        assert data["key_takeaways"] == ["If statements check booleans"]
+        assert data["is_published"] is True
+
+        db_execute("DELETE FROM course_modules WHERE id = %s", (data["id"],))
 
     def test_create_module_invalid_course(self, client, admin_user):
         """Creating a module in a non-existent course returns 404."""
@@ -66,6 +90,18 @@ class TestModuleUpdate:
         )
         assert response.status_code == 200
         assert response.json()["module"]["title"] == "Updated Module"
+
+    def test_update_module_publish_toggle(self, client, admin_user, test_module):
+        """Admin can toggle module published status."""
+        response = client.put(
+            f"/courses/modules/{test_module['id']}",
+            json={"is_published": True, "objectives": ["New Obj"]},
+            headers=admin_user["headers"]
+        )
+        assert response.status_code == 200
+        mod = response.json()["module"]
+        assert mod["is_published"] is True
+        assert mod["objectives"] == ["New Obj"]
 
     def test_update_module_no_fields(self, client, admin_user, test_module):
         """Updating with no fields returns 400."""
@@ -159,11 +195,12 @@ class TestModuleDelete:
 class TestTrainingContent:
 
     def test_create_content_text(self, client, admin_user, test_module):
-        """Admin can create TEXT content for a module."""
+        """Admin can create TEXT content for a module with a title."""
         response = client.post(
             f"/courses/modules/{test_module['id']}/content",
             json={
                 "content_type": "TEXT",
+                "title": "Introduction Lesson",
                 "content": "This is some training text content.",
                 "content_order": 1
             },
@@ -172,15 +209,17 @@ class TestTrainingContent:
         assert response.status_code == 201
         data = response.json()
         assert data["content"]["content_type"] == "TEXT"
+        assert data["content"]["title"] == "Introduction Lesson"
         assert data["content"]["module_id"] == test_module["id"]
         db_execute("DELETE FROM training_contents WHERE id = %s", (data["content"]["id"],))
 
     def test_create_content_video(self, client, admin_user, test_module):
-        """Admin can create VIDEO content."""
+        """Admin can create VIDEO content with a title."""
         response = client.post(
             f"/courses/modules/{test_module['id']}/content",
             json={
                 "content_type": "VIDEO",
+                "title": "Demo Video",
                 "content": "https://example.com/video.mp4",
                 "content_order": 2
             },
@@ -188,6 +227,7 @@ class TestTrainingContent:
         )
         assert response.status_code == 201
         assert response.json()["content"]["content_type"] == "VIDEO"
+        assert response.json()["content"]["title"] == "Demo Video"
         db_execute(
             "DELETE FROM training_contents WHERE id = %s",
             (response.json()["content"]["id"],)
@@ -216,11 +256,11 @@ class TestTrainingContent:
         assert response.status_code == 403
 
     def test_update_content_success(self, client, admin_user, test_module):
-        """Admin can update training content."""
+        """Admin can update training content title and content."""
         result = db_execute(
             """
-            INSERT INTO training_contents (module_id, content_type, content, content_order)
-            VALUES (%s, 'TEXT', 'Original content', 10)
+            INSERT INTO training_contents (module_id, content_type, title, content, content_order)
+            VALUES (%s, 'TEXT', 'Old Title', 'Original content', 10)
             RETURNING id
             """,
             (test_module["id"],),
@@ -230,7 +270,7 @@ class TestTrainingContent:
 
         response = client.put(
             f"/courses/modules/{test_module['id']}/content/{content_id}",
-            json={"content": "Updated content"},
+            json={"title": "New Title", "content": "Updated content"},
             headers=admin_user["headers"]
         )
         assert response.status_code == 200

@@ -3,6 +3,8 @@ Authentication tests: login, JWT validation, role enforcement.
 """
 
 import uuid
+from datetime import datetime, timedelta, timezone
+
 import pytest
 import jwt
 from fastapi.testclient import TestClient
@@ -47,6 +49,7 @@ class TestLogin:
         data = response.json()
         assert "access_token" in data
         assert data["user"]["role"] == "STUDENT"
+        assert response.cookies.get("refresh_token") is not None
 
     def test_login_wrong_password(self, client, admin_user):
         """Login with wrong password returns 401."""
@@ -135,6 +138,76 @@ class TestJWTValidation:
 # ============================================================
 # Role Authorization Tests
 # ============================================================
+
+class TestRefreshTokens:
+
+    def test_valid_refresh_token_issues_new_access_token(self, client, admin_user):
+        """A valid refresh token issues a new access token."""
+        login_response = client.post(
+            "/auth/login",
+            json={"email": admin_user["email"], "password": admin_user["password"]}
+        )
+        refresh_token = login_response.cookies.get("refresh_token")
+        assert refresh_token is not None
+
+        refresh_response = client.post("/auth/refresh")
+        assert refresh_response.status_code == 200
+        data = refresh_response.json()
+        assert "access_token" in data
+        assert data["token_type"] == "bearer"
+        assert data["user"]["role"] == "ADMIN"
+        assert data["user"]["organization_id"] == admin_user["organization_id"]
+
+    def test_expired_refresh_token_rejected(self, client, admin_user):
+        """Expired refresh tokens are rejected with 401."""
+        expired_payload = {
+            "sub": str(admin_user["id"]),
+            "email": admin_user["email"],
+            "role": "ADMIN",
+            "org": admin_user["organization_id"],
+            "token_type": "refresh",
+            "exp": datetime.now(timezone.utc) - timedelta(hours=1),
+        }
+        expired_token = jwt.encode(expired_payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+        response = client.post("/auth/refresh", cookies={"refresh_token": expired_token})
+        assert response.status_code == 401
+
+    def test_invalid_refresh_token_rejected(self, client):
+        """Malformed or invalid refresh tokens are rejected."""
+        response = client.post("/auth/refresh", cookies={"refresh_token": "not-a-valid-refresh-token"})
+        assert response.status_code == 401
+
+    def test_refresh_token_cannot_be_used_as_access_token(self, client, admin_user):
+        """A refresh token cannot be accepted on protected endpoints as an access token."""
+        login_response = client.post(
+            "/auth/login",
+            json={"email": admin_user["email"], "password": admin_user["password"]}
+        )
+        refresh_token = login_response.cookies.get("refresh_token")
+        assert refresh_token is not None
+
+        response = client.get(
+            "/courses/",
+            headers={"Authorization": f"Bearer {refresh_token}"}
+        )
+        assert response.status_code == 401
+
+    def test_inactive_user_cannot_refresh(self, client, admin_user):
+        """Inactive users cannot use refresh tokens to regain a session."""
+        db_execute("UPDATE users SET is_active = FALSE WHERE id = %s", (admin_user["id"],))
+        try:
+            login_response = client.post(
+                "/auth/login",
+                json={"email": admin_user["email"], "password": admin_user["password"]}
+            )
+            assert login_response.status_code == 401
+
+            refresh_token = login_response.cookies.get("refresh_token")
+            response = client.post("/auth/refresh", cookies={"refresh_token": refresh_token or ""})
+            assert response.status_code == 401
+        finally:
+            db_execute("UPDATE users SET is_active = TRUE WHERE id = %s", (admin_user["id"],))
+
 
 class TestRoleAuthorization:
 

@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routers import admin
 from app.routers import students
 from app.routers.auth import router as auth_router
+from app.routers.signup import router as signup_router
 from app.routers.courses import router as courses_router
 from app.routers.modules import router as modules_router
 from app.routers.quizzes import router as quizzes_router
@@ -25,6 +26,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
+        "http://localhost:5174",
         "http://127.0.0.1:5173",
     ],
     allow_credentials=True,
@@ -38,6 +40,7 @@ app.add_middleware(
 # ============================================================
 
 app.include_router(auth_router)
+app.include_router(signup_router)
 app.include_router(courses_router)
 app.include_router(modules_router)
 app.include_router(quizzes_router)

@@ -56,29 +56,38 @@ def db_execute(sql, params=(), fetch=False):
 
 @pytest.fixture(scope="session")
 def admin_user():
-    """Create a test admin user and return credentials + JWT token."""
+    """Create a test admin user (with organization) and return credentials + JWT token."""
     suffix = uuid.uuid4().hex[:8]
     email = f"testadmin_{suffix}@example.com"
     password = "AdminTest@123"
     hashed = password_hash.hash(password)
 
+    # Create Organization
+    org_res = db_execute(
+        "INSERT INTO organizations (name) VALUES (%s) RETURNING id",
+        (f"Test Admin Org {suffix}",),
+        fetch=True
+    )
+    org_id = org_res[0][0]
+
     result = db_execute(
         """
-        INSERT INTO users (name, email, password_hash, role, is_active)
-        VALUES (%s, %s, %s, 'ADMIN', TRUE)
-        RETURNING id, name, email, role
+        INSERT INTO users (name, email, password_hash, role, is_active, organization_id)
+        VALUES (%s, %s, %s, 'ADMIN', TRUE, %s)
+        RETURNING id, name, email, role, organization_id
         """,
-        ("Test Admin", email, hashed),
+        ("Test Admin", email, hashed, org_id),
         fetch=True
     )
     user = result[0]
-    token = create_access_token(user_id=user[0], email=user[2], role=user[3])
+    token = create_access_token(user_id=user[0], email=user[2], role=user[3], organization_id=user[4])
 
     yield {
         "id": user[0],
         "name": user[1],
         "email": user[2],
         "role": user[3],
+        "organization_id": user[4],
         "password": password,
         "token": token,
         "headers": {"Authorization": f"Bearer {token}"}
@@ -86,6 +95,7 @@ def admin_user():
 
     # Cleanup
     db_execute("DELETE FROM users WHERE id = %s", (user[0],))
+    db_execute("DELETE FROM organizations WHERE id = %s", (org_id,))
 
 
 # ============================================================
@@ -94,7 +104,7 @@ def admin_user():
 
 @pytest.fixture(scope="session")
 def student_user(admin_user):
-    """Create a test student user and return credentials + JWT token."""
+    """Create a test student user belonging to admin_user's organization."""
     suffix = uuid.uuid4().hex[:8]
     email = f"teststudent_{suffix}@example.com"
     password = "StudentTest@123"
@@ -102,21 +112,22 @@ def student_user(admin_user):
 
     result = db_execute(
         """
-        INSERT INTO users (name, email, password_hash, role, is_active)
-        VALUES (%s, %s, %s, 'STUDENT', TRUE)
-        RETURNING id, name, email, role
+        INSERT INTO users (name, email, password_hash, role, is_active, organization_id)
+        VALUES (%s, %s, %s, 'STUDENT', TRUE, %s)
+        RETURNING id, name, email, role, organization_id
         """,
-        ("Test Student", email, hashed),
+        ("Test Student", email, hashed, admin_user["organization_id"]),
         fetch=True
     )
     user = result[0]
-    token = create_access_token(user_id=user[0], email=user[2], role=user[3])
+    token = create_access_token(user_id=user[0], email=user[2], role=user[3], organization_id=user[4])
 
     yield {
         "id": user[0],
         "name": user[1],
         "email": user[2],
         "role": user[3],
+        "organization_id": user[4],
         "password": password,
         "token": token,
         "headers": {"Authorization": f"Bearer {token}"}
@@ -136,11 +147,11 @@ def test_course(admin_user):
     suffix = uuid.uuid4().hex[:6]
     result = db_execute(
         """
-        INSERT INTO courses (title, description, created_by, is_active)
-        VALUES (%s, %s, %s, TRUE)
+        INSERT INTO courses (title, description, created_by, organization_id, is_active)
+        VALUES (%s, %s, %s, %s, TRUE)
         RETURNING id, title, description
         """,
-        (f"Test Course {suffix}", "Test Description", admin_user["id"]),
+        (f"Test Course {suffix}", "Test Description", admin_user["id"], admin_user["organization_id"]),
         fetch=True
     )
     course = result[0]

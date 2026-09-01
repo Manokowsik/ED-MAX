@@ -37,3 +37,7 @@ class ResendActivationRequest(BaseModel):
 
 class TestEmailRequest(BaseModel):
     email: EmailStr
+
+
+class AcceptInvitationRequest(BaseModel):
+    token: str

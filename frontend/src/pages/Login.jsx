@@ -46,14 +46,19 @@ export default function Login() {
         setError('Unknown user role. Please contact support.');
       }
     } catch (err) {
-      if (err.message?.includes('401') || err.message === 'Invalid email or password') {
-        setError('Invalid email or password. Please try again.');
-      } else if (err.message?.toLowerCase().includes('not verified')) {
+      const msg = err.message || '';
+      if (msg.toLowerCase().includes('account does not exist')) {
+        setError('Account does not exist. Please check your email or contact your administrator.');
+      } else if (msg.toLowerCase().includes('invalid password')) {
+        setError('Invalid password. Please try again.');
+      } else if (msg.toLowerCase().includes('inactive') || msg.toLowerCase().includes('disabled')) {
+        setError('Account is inactive or disabled. Please contact your administrator.');
+      } else if (msg.toLowerCase().includes('not verified')) {
         setError('Email not verified. Please verify your email before logging in.');
-      } else if (err.message?.toLowerCase().includes('network') || err.message?.toLowerCase().includes('fetch')) {
+      } else if (msg.toLowerCase().includes('network') || msg.toLowerCase().includes('fetch')) {
         setError('Unable to connect to the server. Please check your connection.');
       } else {
-        setError(err.message || 'Login failed. Please try again.');
+        setError(msg || 'Login failed. Please try again.');
       }
     } finally {
       setLoading(false);

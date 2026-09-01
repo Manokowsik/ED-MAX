@@ -485,6 +485,173 @@ class AuthService:
             cursor.close()
 
     # ============================================================
+    # Organization Invitation (existing user → new org)
+    # ============================================================
+
+    @classmethod
+    def create_org_invitation(
+        cls,
+        conn,
+        user_id: int,
+        org_id: int,
+        name: str,
+        email: str,
+        org_name: str,
+    ) -> str:
+        """
+        Create a single-use org invitation token for an EXISTING user being
+        added to a new organization. Invalidates any prior unused invitation
+        for the same (user, org) pair, then sends the invitation email.
+        """
+        cursor = conn.cursor()
+        try:
+            # Invalidate previous unused invitations for this user+org pair
+            cursor.execute(
+                """
+                UPDATE org_invitations
+                SET is_used = TRUE
+                WHERE user_id = %s AND organization_id = %s AND is_used = FALSE
+                """,
+                (user_id, org_id),
+            )
+
+            token = cls.generate_secure_token()
+            token_hash = cls.hash_token(token)
+            expires_at = datetime.now(timezone.utc) + timedelta(
+                hours=ACTIVATION_TOKEN_EXPIRE_HOURS
+            )
+
+            cursor.execute(
+                """
+                INSERT INTO org_invitations (user_id, organization_id, token_hash, expires_at, is_used)
+                VALUES (%s, %s, %s, %s, FALSE)
+                """,
+                (user_id, org_id, token_hash, expires_at),
+            )
+            conn.commit()
+
+            EmailService.send_org_invitation(email, name, org_name, token)
+            return token
+        finally:
+            cursor.close()
+
+    @classmethod
+    def validate_org_invitation_token(cls, conn, token: str) -> dict:
+        """
+        Validates an org invitation token and returns user + org info.
+        Does NOT consume the token.
+        """
+        cursor = conn.cursor()
+        try:
+            token_hash = cls.hash_token(token.strip())
+            cursor.execute(
+                """
+                SELECT oi.id, oi.expires_at, oi.is_used,
+                       u.id, u.name, u.email,
+                       o.id, o.name
+                FROM org_invitations oi
+                JOIN users u ON u.id = oi.user_id
+                JOIN organizations o ON o.id = oi.organization_id
+                WHERE oi.token_hash = %s
+                """,
+                (token_hash,),
+            )
+            row = cursor.fetchone()
+
+            if not row or row[2]:  # not found or already used
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid or already used invitation token",
+                )
+
+            inv_id, expires_at, is_used, user_id, name, email, org_id, org_name = row
+
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+            if datetime.now(timezone.utc) > expires_at:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invitation token has expired. Please ask your administrator to resend the invitation.",
+                )
+
+            return {
+                "valid": True,
+                "user": {"id": user_id, "name": name, "email": email},
+                "organization": {"id": org_id, "name": org_name},
+            }
+        finally:
+            cursor.close()
+
+    @classmethod
+    def accept_org_invitation(cls, conn, token: str) -> dict:
+        """
+        Accepts an org invitation:
+        1. Validates the token.
+        2. Upserts the organization_memberships row (is_active=TRUE).
+        3. Marks the token as used.
+        Does NOT change the user's password or primary organization_id.
+        """
+        cursor = conn.cursor()
+        try:
+            token_hash = cls.hash_token(token.strip())
+            cursor.execute(
+                """
+                SELECT oi.id, oi.expires_at, oi.is_used,
+                       u.id, u.name, u.email,
+                       o.id, o.name
+                FROM org_invitations oi
+                JOIN users u ON u.id = oi.user_id
+                JOIN organizations o ON o.id = oi.organization_id
+                WHERE oi.token_hash = %s
+                """,
+                (token_hash,),
+            )
+            row = cursor.fetchone()
+
+            if not row or row[2]:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid or already used invitation token",
+                )
+
+            inv_id, expires_at, is_used, user_id, name, email, org_id, org_name = row
+
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+            if datetime.now(timezone.utc) > expires_at:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invitation token has expired. Please ask your administrator to resend the invitation.",
+                )
+
+            # Upsert membership (handles edge case where row was created but inactive)
+            cursor.execute(
+                """
+                INSERT INTO organization_memberships (user_id, organization_id, is_active, joined_at)
+                VALUES (%s, %s, TRUE, CURRENT_TIMESTAMP)
+                ON CONFLICT (user_id, organization_id)
+                DO UPDATE SET is_active = TRUE, joined_at = CURRENT_TIMESTAMP
+                """,
+                (user_id, org_id),
+            )
+
+            # Consume the token
+            cursor.execute(
+                "UPDATE org_invitations SET is_used = TRUE WHERE id = %s",
+                (inv_id,),
+            )
+            conn.commit()
+
+            return {
+                "message": f"You've successfully joined {org_name}. You can now sign in.",
+                "organization": {"id": org_id, "name": org_name},
+            }
+        finally:
+            cursor.close()
+
+    # ============================================================
     # Forgot & Reset Password
     # ============================================================
 

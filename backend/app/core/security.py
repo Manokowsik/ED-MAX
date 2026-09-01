@@ -37,7 +37,8 @@ def create_access_token(
     user_id: int,
     email: str,
     role: str,
-    organization_id: int | None = None
+    organization_id: int | None = None,
+    token_version: int = 1,
 ):
     expire = datetime.now(timezone.utc) + timedelta(
         minutes=ACCESS_TOKEN_EXPIRE_MINUTES
@@ -48,6 +49,7 @@ def create_access_token(
         "email": email,
         "role": role,
         "org": organization_id,
+        "tv": token_version,
         "token_type": "access",
         "exp": expire
     }
@@ -63,7 +65,8 @@ def create_refresh_token(
     user_id: int,
     email: str,
     role: str,
-    organization_id: int | None = None
+    organization_id: int | None = None,
+    token_version: int = 1,
 ):
     expire = datetime.now(timezone.utc) + timedelta(
         days=REFRESH_TOKEN_EXPIRE_DAYS
@@ -74,6 +77,7 @@ def create_refresh_token(
         "email": email,
         "role": role,
         "org": organization_id,
+        "tv": token_version,
         "token_type": "refresh",
         "exp": expire
     }
@@ -127,6 +131,7 @@ def get_current_user(
     email = payload.get("email")
     role = payload.get("role")
     organization_id = payload.get("org")
+    token_version = payload.get("tv")
 
     if not user_id or not email or not role:
         raise HTTPException(
@@ -134,8 +139,38 @@ def get_current_user(
             detail="Invalid authentication token"
         )
 
+    from app.db.database import get_connection
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT is_active, deleted_at, token_version, name
+            FROM users
+            WHERE id = %s
+            """,
+            (int(user_id),)
+        )
+        row = cursor.fetchone()
+    finally:
+        cursor.close()
+        conn.close()
+
+    if not row or not row[0] or row[1] is not None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Account is inactive or has been deactivated"
+        )
+
+    if token_version is not None and row[2] != token_version:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session has expired. Please log in again."
+        )
+
     return {
         "id": int(user_id),
+        "name": row[3],
         "email": email,
         "role": role,
         "organization_id": int(organization_id) if organization_id else None

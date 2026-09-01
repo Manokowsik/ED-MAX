@@ -222,6 +222,29 @@ def generate_certificate(
         certificate = cursor.fetchone()
         conn.commit()
 
+        # Trigger notification and email
+        from app.services.notification_service import NotificationService
+        from app.services.email_service import EmailService
+
+        try:
+            NotificationService.create(
+                conn,
+                user_id=student_id,
+                organization_id=current_user.get("organization_id"),
+                type=NotificationService.CERTIFICATE_ISSUED,
+                title="Certificate Ready!",
+                message=f"Your certificate for {course[1]} is ready.",
+                link="/student/certificates",
+            )
+            EmailService.send_certificate_ready(
+                email=student[2],
+                student_name=student[1],
+                course_name=course[1],
+                certificate_number=certificate_number
+            )
+        except Exception:
+            pass
+
         return {
             "message": "Certificate generated successfully",
             "certificate": {
@@ -360,14 +383,17 @@ def get_student_certificates(
     cursor = conn.cursor()
 
     try:
-        # If Admin, check if student belongs to admin's organization
+        # If Admin, check if student belongs to admin's organization (via organization_memberships)
         if current_user["role"].upper() == "ADMIN":
             cursor.execute(
-                "SELECT organization_id FROM users WHERE id = %s AND LOWER(role) = 'student'",
-                (student_id,)
+                """
+                SELECT u.id FROM users u
+                JOIN organization_memberships om ON om.user_id = u.id
+                WHERE u.id = %s AND LOWER(u.role) = 'student' AND om.organization_id = %s AND om.is_active = TRUE
+                """,
+                (student_id, current_user["organization_id"])
             )
-            student_row = cursor.fetchone()
-            if not student_row or student_row[0] != current_user["organization_id"]:
+            if not cursor.fetchone():
                 raise HTTPException(
                     status_code=403,
                     detail="Access denied"

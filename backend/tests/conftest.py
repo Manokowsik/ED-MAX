@@ -120,6 +120,17 @@ def student_user(admin_user):
         fetch=True
     )
     user = result[0]
+
+    # Insert org membership so GET /admin/students can find this student
+    db_execute(
+        """
+        INSERT INTO organization_memberships (user_id, organization_id, is_active)
+        VALUES (%s, %s, TRUE)
+        ON CONFLICT (user_id, organization_id) DO NOTHING
+        """,
+        (user[0], admin_user["organization_id"])
+    )
+
     token = create_access_token(user_id=user[0], email=user[2], role=user[3], organization_id=user[4])
 
     yield {

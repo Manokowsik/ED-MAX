@@ -927,24 +927,27 @@ def assign_course(
     try:
         # Verify course exists, is active, and belongs to admin's organization
         cursor.execute(
-            "SELECT id FROM courses WHERE id = %s AND organization_id = %s AND is_active = TRUE",
+            "SELECT id, title FROM courses WHERE id = %s AND organization_id = %s AND is_active = TRUE",
             (course_id, org_id)
         )
-        if not cursor.fetchone():
+        course_row = cursor.fetchone()
+        if not course_row:
             raise HTTPException(
                 status_code=404,
                 detail="Course not found or not active"
             )
 
-        # Verify student exists, is active, and belongs to admin's organization
+        # Verify student exists, is active, and belongs to admin's organization (via organization_memberships)
         cursor.execute(
             """
-            SELECT id FROM users
-            WHERE id = %s AND organization_id = %s AND LOWER(role) = 'student' AND is_active = TRUE
+            SELECT u.id, u.name, u.email FROM users u
+            JOIN organization_memberships om ON om.user_id = u.id
+            WHERE u.id = %s AND om.organization_id = %s AND om.is_active = TRUE AND LOWER(u.role) = 'student' AND u.is_active = TRUE
             """,
             (assign_data.student_id, org_id)
         )
-        if not cursor.fetchone():
+        student_row = cursor.fetchone()
+        if not student_row:
             raise HTTPException(
                 status_code=404,
                 detail="Student not found or not active"
@@ -960,8 +963,8 @@ def assign_course(
         )
         if cursor.fetchone():
             raise HTTPException(
-                status_code=409,
-                detail="Student is already assigned to this course"
+                status_code=400,
+                detail="Student is already enrolled in this course"
             )
 
         # Insert enrollment
@@ -975,6 +978,22 @@ def assign_course(
         )
         enrollment = cursor.fetchone()
         conn.commit()
+
+        # Send enrollment notification & email
+        from app.services.enrollment_service import notify_enrollment
+        notify_enrollment(
+            conn,
+            student={
+                "id": student_row[0],
+                "name": student_row[1],
+                "email": student_row[2],
+                "organization_id": org_id,
+            },
+            actor_name=current_user.get("name") or "Administrator",
+            course_id=course_id,
+            course_title=course_row[1],
+            send_email=True
+        )
 
         return {
             "message": "Course assigned to student successfully",

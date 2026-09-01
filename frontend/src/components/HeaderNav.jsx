@@ -99,14 +99,31 @@ export default function HeaderNav() {
             </div>
 
             {showUserMenu && (
-              <div className="header-user-dropdown">
-                <div className="dropdown-user-email">{user?.email}</div>
-                <hr />
+              <div className="header-user-dropdown" style={{ minWidth: '220px', padding: '8px' }}>
+                <div style={{ padding: '8px 12px' }}>
+                  <div style={{ fontWeight: 700, color: 'var(--gray-900)', fontSize: '0.9rem' }}>{user?.name ?? 'User'}</div>
+                  <div className="dropdown-user-email" style={{ fontSize: '0.75rem', color: 'var(--gray-500)', wordBreak: 'break-all' }}>{user?.email}</div>
+                </div>
+                <hr style={{ margin: '4px 0', borderColor: 'var(--gray-200)' }} />
+                <button
+                  type="button"
+                  className="dropdown-item"
+                  onClick={() => {
+                    setShowUserMenu(false);
+                    navigate(isAdmin ? '/admin/settings' : '/student/settings');
+                  }}
+                  id="dropdown-settings-btn"
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '8px 12px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', borderRadius: '4px', fontSize: '0.85rem', color: 'var(--gray-700)' }}
+                >
+                  ⚙️ Account Settings
+                </button>
+                <hr style={{ margin: '4px 0', borderColor: 'var(--gray-200)' }} />
                 <button
                   type="button"
                   className="dropdown-item logout"
                   onClick={handleLogout}
                   id="dropdown-logout-btn"
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '8px 12px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', borderRadius: '4px', fontSize: '0.85rem', color: 'var(--danger)' }}
                 >
                   🚪 Sign out
                 </button>

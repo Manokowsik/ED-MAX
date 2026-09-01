@@ -11,6 +11,7 @@ from app.schemas.auth import (
     ResetPasswordRequest,
     ActivateAccountRequest,
     ResendActivationRequest,
+    AcceptInvitationRequest,
     TestEmailRequest,
 )
 from app.services.auth_service import AuthService
@@ -61,12 +62,14 @@ def login(login_data: LoginRequest, response: Response):
                 password_hash,
                 role,
                 organization_id,
-                is_verified
+                is_verified,
+                token_version,
+                is_active,
+                deleted_at
             FROM users
-            WHERE email = %s
-            AND is_active = TRUE
+            WHERE LOWER(email) = LOWER(%s)
             """,
-            (login_data.email,)
+            (login_data.email.strip(),)
         )
 
         user = cursor.fetchone()
@@ -78,7 +81,13 @@ def login(login_data: LoginRequest, response: Response):
     if not user:
         raise HTTPException(
             status_code=401,
-            detail="Invalid email or password"
+            detail="Account does not exist"
+        )
+
+    if not user[8] or user[9] is not None:
+        raise HTTPException(
+            status_code=401,
+            detail="Account is inactive or disabled. Please contact your administrator."
         )
 
     if not password_hash.verify(
@@ -87,7 +96,7 @@ def login(login_data: LoginRequest, response: Response):
     ):
         raise HTTPException(
             status_code=401,
-            detail="Invalid email or password"
+            detail="Invalid password. Please try again."
         )
 
     if not user[6]:
@@ -100,14 +109,16 @@ def login(login_data: LoginRequest, response: Response):
         user_id=user[0],
         email=user[2],
         role=user[4],
-        organization_id=user[5]
+        organization_id=user[5],
+        token_version=user[7]
     )
 
     refresh_token = create_refresh_token(
         user_id=user[0],
         email=user[2],
         role=user[4],
-        organization_id=user[5]
+        organization_id=user[5],
+        token_version=user[7]
     )
 
     cookie_opts = get_cookie_settings()
@@ -237,6 +248,37 @@ def resend_activation(data: ResendActivationRequest):
         conn.close()
 
 
+# ============================================================
+# Organization Invitation (existing user → new org)
+# ============================================================
+
+@router.get("/validate-invitation-token")
+def validate_invitation_token(token: str):
+    """
+    Validates an org invitation token and returns user + org info.
+    Called by the /accept-invitation frontend page on mount.
+    """
+    conn = get_connection()
+    try:
+        return AuthService.validate_org_invitation_token(conn, token)
+    finally:
+        conn.close()
+
+
+@router.post("/accept-invitation")
+def accept_invitation(data: AcceptInvitationRequest):
+    """
+    Accepts an org invitation token: inserts/activates the organization_membership
+    row and marks the token as used. The user does NOT need to set a password —
+    they already have one.
+    """
+    conn = get_connection()
+    try:
+        return AuthService.accept_org_invitation(conn, data.token)
+    finally:
+        conn.close()
+
+
 @router.post("/test-email")
 def test_email(data: TestEmailRequest):
     """
@@ -299,7 +341,7 @@ async def refresh_access_token(request: Request):
     try:
         cursor.execute(
             """
-            SELECT id, name, email, role, organization_id, is_active
+            SELECT id, name, email, role, organization_id, is_active, deleted_at, token_version
             FROM users
             WHERE id = %s
             """,
@@ -310,7 +352,13 @@ async def refresh_access_token(request: Request):
         cursor.close()
         conn.close()
 
-    if not user or not user[5]:
+    if not user or not user[5] or user[6] is not None:
+        raise HTTPException(
+            status_code=401,
+            detail="Session expired. Please sign in again."
+        )
+
+    if payload.get("tv") is not None and user[7] != payload.get("tv"):
         raise HTTPException(
             status_code=401,
             detail="Session expired. Please sign in again."
@@ -320,7 +368,8 @@ async def refresh_access_token(request: Request):
         user_id=user[0],
         email=user[2],
         role=user[3],
-        organization_id=user[4]
+        organization_id=user[4],
+        token_version=user[7]
     )
 
     return {

@@ -67,8 +67,21 @@ function CertificateCard({ cert, onView }) {
 // Uses exact clean gold-bordered design from CertificateVerify
 // ============================================================
 function CertificateDisplayModal({ cert, onClose }) {
-  function handlePrint() {
-    window.print();
+  const [copied, setCopied] = useState(false);
+
+  function handleShare() {
+    const url = `${window.location.origin}/verify/${cert.certificate_number}`;
+    if (navigator.share) {
+      navigator.share({
+        title: `Certificate of Completion - ${cert.student_name}`,
+        text: `Check out ${cert.student_name}'s verified training certificate for ${cert.course_title} on ED-MAX!`,
+        url: url,
+      }).catch(() => {});
+    } else if (navigator.clipboard) {
+      navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 3000);
+    }
   }
 
   return (
@@ -147,7 +160,7 @@ function CertificateDisplayModal({ cert, onClose }) {
         </div>
 
         {/* CONTROLS (Hidden during print) */}
-        <div className="no-print" style={{ display: 'flex', justifyContent: 'center', gap: 'var(--space-4)', marginTop: 'var(--space-6)' }}>
+        <div className="no-print" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 'var(--space-4)', marginTop: 'var(--space-6)', flexWrap: 'wrap' }}>
           <button
             type="button"
             className="btn btn-outline"
@@ -160,10 +173,20 @@ function CertificateDisplayModal({ cert, onClose }) {
           <button
             type="button"
             className="btn btn-primary btn-lg"
-            onClick={handlePrint}
-            id="print-cert-btn"
+            onClick={() => window.print()}
+            id="download-cert-btn"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
           >
-            🖨️ Print Certificate
+            <span>📥</span> Download PDF
+          </button>
+          <button
+            type="button"
+            className="btn btn-outline btn-lg"
+            onClick={handleShare}
+            id="share-cert-btn"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: '#fff' }}
+          >
+            <span>{copied ? '✓' : '🔗'}</span> {copied ? 'Link Copied!' : 'Share Certificate'}
           </button>
         </div>
       </div>

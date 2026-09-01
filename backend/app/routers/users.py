@@ -1,241 +1,146 @@
-from fastapi import APIRouter, HTTPException
-from pwdlib import PasswordHash
+from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.core.security import get_current_user
 from app.db.database import get_connection
-from app.schemas.user import CreateStudentRequest
+from app.schemas.profile import (
+    ChangePasswordRequest,
+    DeleteAccountRequest,
+    ProfileUpdateRequest,
+)
+from app.services.notification_service import NotificationService
+from app.services.profile_service import ProfileService
 
 
 router = APIRouter(
-    prefix="/admin",
-    tags=["Admin"]
+    prefix="/users",
+    tags=["Users"]
 )
 
-password_hash = PasswordHash.recommended()
-
 
 # ============================================================
-# Create Student
+# Profile Management (Self-Service: Current Authenticated User)
 # ============================================================
 
-@router.post("/students")
-def create_student(student_data: CreateStudentRequest):
-
+@router.get("/me")
+def get_my_profile(current_user: dict = Depends(get_current_user)):
+    """Retrieve the profile of the currently authenticated user."""
     conn = get_connection()
-    cursor = conn.cursor()
-
     try:
-
-        # ----------------------------------------------------
-        # Check whether email already exists
-        # ----------------------------------------------------
-
-        cursor.execute(
-            """
-            SELECT id
-            FROM users
-            WHERE email = %s
-            """,
-            (student_data.email,)
-        )
-
-        if cursor.fetchone():
-
-            raise HTTPException(
-                status_code=400,
-                detail="Email already exists"
-            )
-
-
-        # ----------------------------------------------------
-        # Hash Password
-        # ----------------------------------------------------
-
-        hashed_password = password_hash.hash(
-            student_data.password
-        )
-
-
-        # ----------------------------------------------------
-        # Create Student
-        # ----------------------------------------------------
-
-        cursor.execute(
-            """
-            INSERT INTO users
-            (
-                name,
-                email,
-                password_hash,
-                role,
-                is_active
-            )
-            VALUES
-            (
-                %s,
-                %s,
-                %s,
-                'STUDENT',
-                TRUE
-            )
-            RETURNING
-                id,
-                name,
-                email,
-                role,
-                is_active
-            """,
-            (
-                student_data.name,
-                student_data.email,
-                hashed_password
-            )
-        )
-
-        student = cursor.fetchone()
-
-        conn.commit()
-
-
-        # ----------------------------------------------------
-        # Response
-        # ----------------------------------------------------
-
-        return {
-            "message": "Student created successfully",
-            "student": {
-                "id": student[0],
-                "name": student[1],
-                "email": student[2],
-                "role": student[3],
-                "is_active": student[4]
-            }
-        }
-
-
-    except HTTPException:
-
-        conn.rollback()
-        raise
-
-
-    except Exception as e:
-
-        conn.rollback()
-
-        raise HTTPException(
-            status_code=500,
-            detail=str(e)
-        )
-
-
+        profile = ProfileService.get_profile(conn, current_user["id"])
+        return {"user": profile}
     finally:
+        conn.close()
 
-        cursor.close()
+
+@router.patch("/me")
+def update_my_profile(
+    data: ProfileUpdateRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Update profile details (e.g. name) for the authenticated user."""
+    conn = get_connection()
+    try:
+        profile = ProfileService.update_profile(conn, current_user, data.name)
+        return {
+            "message": "Profile updated successfully",
+            "user": profile
+        }
+    finally:
+        conn.close()
+
+
+@router.post("/me/change-password")
+def change_my_password(
+    data: ChangePasswordRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Change password for authenticated user while logged in."""
+    conn = get_connection()
+    try:
+        return ProfileService.change_password(
+            conn,
+            current_user=current_user,
+            current_password=data.current_password,
+            new_password=data.new_password,
+            confirm_password=data.confirm_password,
+        )
+    finally:
+        conn.close()
+
+
+@router.delete("/me")
+def delete_my_account(
+    data: DeleteAccountRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Safely deactivate own account with confirmation and password verification."""
+    conn = get_connection()
+    try:
+        return ProfileService.delete_account(
+            conn,
+            current_user=current_user,
+            confirmation=data.confirmation,
+            current_password=data.current_password,
+        )
+    finally:
         conn.close()
 
 
 # ============================================================
-# Get Student Assigned Courses
+# Notifications (Current Authenticated User)
 # ============================================================
 
-@router.get("/students/{student_id}/courses")
-def get_student_assigned_courses(student_id: int):
-
+@router.get("/me/notifications")
+def get_my_notifications(
+    limit: int = 50,
+    current_user: dict = Depends(get_current_user)
+):
+    """Fetch notifications and unread count for current user."""
     conn = get_connection()
-    cursor = conn.cursor()
-
     try:
-
-        # ----------------------------------------------------
-        # Check Student
-        # ----------------------------------------------------
-
-        cursor.execute(
-            """
-            SELECT
-                id,
-                name,
-                email
-            FROM users
-            WHERE id = %s
-            AND LOWER(role) = 'student'
-            """,
-            (student_id,)
-        )
-
-        student = cursor.fetchone()
-
-
-        if not student:
-
-            raise HTTPException(
-                status_code=404,
-                detail="Student not found"
-            )
-
-
-        # ----------------------------------------------------
-        # Get Assigned Courses
-        # ----------------------------------------------------
-
-        cursor.execute(
-            """
-            SELECT
-                c.id,
-                c.title,
-                c.description,
-                c.is_active,
-                e.status,
-                e.assigned_at,
-                e.completed_at
-
-            FROM enrollments e
-
-            JOIN courses c
-                ON c.id = e.course_id
-
-            WHERE e.student_id = %s
-
-            ORDER BY e.assigned_at DESC
-            """,
-            (student_id,)
-        )
-
-        courses = cursor.fetchall()
-
-
-        # ----------------------------------------------------
-        # Build Response
-        # ----------------------------------------------------
-
-        result = []
-
-        for course in courses:
-
-            result.append(
-                {
-                    "id": course[0],
-                    "title": course[1],
-                    "description": course[2],
-                    "is_active": course[3],
-                    "status": course[4],
-                    "assigned_at": course[5],
-                    "completed_at": course[6]
-                }
-            )
-
-
+        items = NotificationService.list_for_user(conn, current_user["id"], limit=limit)
+        unread = NotificationService.unread_count(conn, current_user["id"])
         return {
-            "student": {
-                "id": student[0],
-                "name": student[1],
-                "email": student[2]
-            },
-            "courses": result
+            "notifications": items,
+            "unread_count": unread
         }
-
-
     finally:
+        conn.close()
 
-        cursor.close()
+
+@router.patch("/me/notifications/{notification_id}/read")
+def mark_notification_read(
+    notification_id: int,
+    current_user: dict = Depends(get_current_user)
+):
+    """Mark a specific notification as read."""
+    conn = get_connection()
+    try:
+        updated = NotificationService.mark_read(conn, current_user["id"], notification_id)
+        if not updated:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Notification not found"
+            )
+        return {
+            "message": "Notification marked as read",
+            "notification": updated
+        }
+    finally:
+        conn.close()
+
+
+@router.post("/me/notifications/read-all")
+def mark_all_notifications_read(
+    current_user: dict = Depends(get_current_user)
+):
+    """Mark all notifications as read for current user."""
+    conn = get_connection()
+    try:
+        count = NotificationService.mark_all_read(conn, current_user["id"])
+        return {
+            "message": "All notifications marked as read",
+            "marked_count": count
+        }
+    finally:
         conn.close()

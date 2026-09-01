@@ -9,6 +9,7 @@ from app.routers.courses import router as courses_router
 from app.routers.modules import router as modules_router
 from app.routers.quizzes import router as quizzes_router
 from app.routers.certificates import router as certificates_router
+from app.routers.users import router as users_router
 
 
 app = FastAPI(
@@ -47,6 +48,8 @@ app.include_router(quizzes_router)
 app.include_router(certificates_router)
 app.include_router(admin.router)
 app.include_router(students.router)
+app.include_router(users_router)
+app.include_router(users_router, prefix="/api")
 
 
 # ============================================================

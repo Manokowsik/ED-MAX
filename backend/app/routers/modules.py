@@ -666,6 +666,73 @@ def complete_module(
             if total_modules > 0 else 0
         )
 
+        # Trigger in-app notifications and completion email
+        from app.services.notification_service import NotificationService
+        from app.services.email_service import EmailService
+
+        try:
+            cursor.execute("SELECT title FROM courses WHERE id = %s", (course_id,))
+            c_row = cursor.fetchone()
+            course_title = c_row[0] if c_row else "Course"
+            org_id = current_user.get("organization_id")
+            course_link = f"/student/courses/{course_id}"
+
+            # 1. Course Started
+            if completed_modules == 1 and not NotificationService.exists(
+                conn, user_id=student_id, type=NotificationService.COURSE_STARTED, link=course_link
+            ):
+                NotificationService.create(
+                    conn,
+                    user_id=student_id,
+                    organization_id=org_id,
+                    type=NotificationService.COURSE_STARTED,
+                    title=f"Started {course_title}",
+                    message=f"You started learning {course_title}. Keep going!",
+                    link=course_link,
+                )
+
+            # 2. Milestones (25%, 50%, 75%)
+            for milestone in (75, 50, 25):
+                if progress_percentage >= milestone:
+                    m_title = f"{milestone}% completed in {course_title}"
+                    if not NotificationService.exists(
+                        conn, user_id=student_id, type=NotificationService.COURSE_MILESTONE, title=m_title
+                    ):
+                        NotificationService.create(
+                            conn,
+                            user_id=student_id,
+                            organization_id=org_id,
+                            type=NotificationService.COURSE_MILESTONE,
+                            title=m_title,
+                            message=f"Great job! You have reached {milestone}% in {course_title}.",
+                            link=course_link,
+                        )
+                    break
+
+            # 3. Course Completed
+            if course_status == "COMPLETED" and not NotificationService.exists(
+                conn, user_id=student_id, type=NotificationService.COURSE_COMPLETED, link=course_link
+            ):
+                NotificationService.create(
+                    conn,
+                    user_id=student_id,
+                    organization_id=org_id,
+                    type=NotificationService.COURSE_COMPLETED,
+                    title=f"Completed {course_title}!",
+                    message=f"Congratulations! You completed {course_title}.",
+                    link="/student/certificates",
+                )
+                try:
+                    EmailService.send_course_completion(
+                        email=current_user["email"],
+                        student_name=current_user.get("name") or "Student",
+                        course_name=course_title,
+                    )
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         return {
             "message": "Module completed successfully",
             "progress": {

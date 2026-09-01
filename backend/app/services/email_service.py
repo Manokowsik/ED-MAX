@@ -197,3 +197,163 @@ class EmailService:
             f"</div>"
         )
         return cls._send_email(email, subject, body, html_body)
+
+    @classmethod
+    def send_course_enrollment(
+        cls,
+        email: str,
+        student_name: str,
+        actor_name: str,
+        course_name: str,
+        course_id: int,
+    ) -> bool:
+        base_url = FRONTEND_URL.rstrip("/")
+        course_link = f"{base_url}/student/courses/{course_id}"
+        subject = f"You've been enrolled in {course_name} — ED-MAX"
+        body = (
+            f"Hello {student_name},\n\n"
+            f"{actor_name} has enrolled you in {course_name} on ED-MAX.\n\n"
+            f"You can now access the course from your ED-MAX dashboard.\n\n"
+            f"{course_link}\n"
+        )
+        html_body = (
+            f"<div style='font-family: sans-serif; padding: 20px; color: #1f2937;'>"
+            f"<h2 style='color: #1e1b4b;'>You've been enrolled in {course_name}</h2>"
+            f"<p>Hello <strong>{student_name}</strong>,</p>"
+            f"<p>{actor_name} has enrolled you in <strong>{course_name}</strong> on ED-MAX.</p>"
+            f"<p>You can now access the course from your ED-MAX dashboard.</p>"
+            f"<p style='margin: 20px 0;'>"
+            f"<a href='{course_link}' style='background-color: #4f46e5; color: #ffffff; padding: 12px 24px; "
+            f"text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 600;'>"
+            f"Open Course"
+            f"</a></p></div>"
+        )
+        return cls._send_email(email, subject, body, html_body)
+
+    @classmethod
+    def send_course_completion(cls, email: str, student_name: str, course_name: str) -> bool:
+        subject = f"Congratulations! You completed {course_name}"
+        body = (
+            f"Hello {student_name},\n\n"
+            f"Congratulations! You have completed {course_name} on ED-MAX.\n\n"
+            f"You can view your progress and generate a certificate from your dashboard.\n"
+        )
+        html_body = (
+            f"<div style='font-family: sans-serif; padding: 20px; color: #1f2937;'>"
+            f"<h2 style='color: #1e1b4b;'>Course completed</h2>"
+            f"<p>Hello <strong>{student_name}</strong>,</p>"
+            f"<p>Congratulations! You have completed <strong>{course_name}</strong> on ED-MAX.</p>"
+            f"<p>You can view your progress and generate a certificate from your dashboard.</p>"
+            f"</div>"
+        )
+        return cls._send_email(email, subject, body, html_body)
+
+    @classmethod
+    def send_certificate_ready(
+        cls,
+        email: str,
+        student_name: str,
+        course_name: str,
+        certificate_number: str,
+    ) -> bool:
+        base_url = FRONTEND_URL.rstrip("/")
+        certs_link = f"{base_url}/student/certificates"
+        subject = "Your ED-MAX certificate is ready"
+        body = (
+            f"Hello {student_name},\n\n"
+            f"Your ED-MAX certificate for {course_name} is ready.\n"
+            f"Certificate number: {certificate_number}\n\n"
+            f"View it here: {certs_link}\n"
+        )
+        html_body = (
+            f"<div style='font-family: sans-serif; padding: 20px; color: #1f2937;'>"
+            f"<h2 style='color: #1e1b4b;'>Your ED-MAX certificate is ready</h2>"
+            f"<p>Hello <strong>{student_name}</strong>,</p>"
+            f"<p>Your certificate for <strong>{course_name}</strong> is ready.</p>"
+            f"<p>Certificate number: <strong>{certificate_number}</strong></p>"
+            f"<p style='margin: 20px 0;'>"
+            f"<a href='{certs_link}' style='background-color: #4f46e5; color: #ffffff; padding: 12px 24px; "
+            f"text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 600;'>"
+            f"View Certificate"
+            f"</a></p></div>"
+        )
+        return cls._send_email(email, subject, body, html_body)
+
+    @classmethod
+    def send_org_invitation(
+        cls,
+        email: str,
+        name: str,
+        org_name: str,
+        token: str,
+    ) -> bool:
+        """
+        Sent to an EXISTING user when an admin adds them to a new organization
+        they don't yet belong to. Unlike send_student_invitation, this user
+        already has a password — they just need to accept the org membership.
+        """
+        base_url = FRONTEND_URL.rstrip("/")
+        invitation_link = f"{base_url}/accept-invitation?token={token}"
+        subject = f"You've been invited to join {org_name} on ED-MAX"
+        body = (
+            f"Hello {name},\n\n"
+            f"An administrator has invited you to join {org_name} on ED-MAX.\n\n"
+            f"Since you already have an ED-MAX account, simply click the link below to accept the invitation:\n\n"
+            f"{invitation_link}\n\n"
+            f"This link is single-use and will expire in {ACTIVATION_TOKEN_EXPIRE_HOURS} hours.\n\n"
+            f"If you did not expect this invitation, you can safely ignore this email.\n"
+        )
+        html_body = (
+            f"<div style='font-family: sans-serif; padding: 20px; color: #1f2937;'>"
+            f"<h2 style='color: #1e1b4b;'>You're invited to join {org_name}</h2>"
+            f"<p>Hello <strong>{name}</strong>,</p>"
+            f"<p>An administrator has invited you to join <strong>{org_name}</strong> on ED-MAX.</p>"
+            f"<p>Since you already have an ED-MAX account, simply click the button below to accept:</p>"
+            f"<p style='margin: 20px 0;'>"
+            f"<a href='{invitation_link}' style='background-color: #4f46e5; color: #ffffff; padding: 12px 24px; "
+            f"text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 600;'>"
+            f"Accept Invitation &amp; Join {org_name}"
+            f"</a>"
+            f"</p>"
+            f"<p>Or copy and paste this URL into your browser:<br/>"
+            f"<a href='{invitation_link}' style='color: #4f46e5;'>{invitation_link}</a></p>"
+            f"<p style='color: #6b7280; font-size: 0.875rem;'>This link is single-use and will expire in {ACTIVATION_TOKEN_EXPIRE_HOURS} hours.</p>"
+            f"</div>"
+        )
+        return cls._send_email(email, subject, body, html_body)
+
+    @classmethod
+    def send_password_changed(cls, email: str, name: str) -> bool:
+        subject = "Your ED-MAX password was changed"
+        body = (
+            f"Hello {name},\n\n"
+            f"Your ED-MAX password was changed. If you made this change, no further action is needed.\n\n"
+            f"If you did not change your password, please reset it immediately and contact your administrator.\n"
+        )
+        html_body = (
+            f"<div style='font-family: sans-serif; padding: 20px; color: #1f2937;'>"
+            f"<h2 style='color: #1e1b4b;'>Your ED-MAX password was changed</h2>"
+            f"<p>Hello <strong>{name}</strong>,</p>"
+            f"<p>Your ED-MAX password was changed. If you made this change, no further action is needed.</p>"
+            f"<p>If you did not change your password, please reset it immediately and contact your administrator.</p>"
+            f"</div>"
+        )
+        return cls._send_email(email, subject, body, html_body)
+
+    @classmethod
+    def send_account_deleted(cls, email: str, name: str) -> bool:
+        subject = "Your ED-MAX account has been deactivated"
+        body = (
+            f"Hello {name},\n\n"
+            f"Your ED-MAX account has been deactivated as requested. You will no longer be able to sign in.\n\n"
+            f"Historical training records for your organization remain on file for reporting and audit purposes.\n"
+        )
+        html_body = (
+            f"<div style='font-family: sans-serif; padding: 20px; color: #1f2937;'>"
+            f"<h2 style='color: #1e1b4b;'>Account deactivated</h2>"
+            f"<p>Hello <strong>{name}</strong>,</p>"
+            f"<p>Your ED-MAX account has been deactivated as requested. You will no longer be able to sign in.</p>"
+            f"<p>Historical training records for your organization remain on file for reporting and audit purposes.</p>"
+            f"</div>"
+        )
+        return cls._send_email(email, subject, body, html_body)

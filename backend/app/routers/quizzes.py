@@ -882,6 +882,21 @@ def submit_quiz(
         attempt = cursor.fetchone()
         conn.commit()
 
+        # In-app notification for quiz result
+        from app.services.notification_service import NotificationService
+        try:
+            NotificationService.create(
+                conn,
+                user_id=student_id,
+                organization_id=current_user.get("organization_id"),
+                type=NotificationService.QUIZ_PASSED if passed else NotificationService.QUIZ_FAILED,
+                title=f"Quiz {'Passed' if passed else 'Failed'} ({score}%)",
+                message=f"You scored {score}% on the module quiz (Passing: {passing_score}%).",
+                link=None,
+            )
+        except Exception:
+            pass
+
         return {
             "message": "Quiz submitted successfully",
             "result": {

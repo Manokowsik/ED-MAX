@@ -41,6 +41,14 @@ export function AuthProvider({ children }) {
     setUser(null);
   }, []);
 
+  const updateUser = useCallback((updatedFields) => {
+    setUser((prev) => {
+      const next = { ...prev, ...updatedFields };
+      localStorage.setItem('user', JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     if (token) {
       scheduleAccessTokenRefresh();
@@ -56,6 +64,7 @@ export function AuthProvider({ children }) {
     isStudent: user?.role === 'STUDENT',
     loginSuccess,
     logout,
+    updateUser,
   };
 
   return (

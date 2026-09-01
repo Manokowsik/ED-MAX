@@ -77,6 +77,24 @@ def env_setup(client):
         (password_hash.hash("StudentPassB@123"), student_b["id"])
     )
 
+    # Ensure membership rows exist (the API-created students get memberships automatically,
+    # but we back-fill here in case of any timing issue with the activation bypass)
+    db_execute(
+        """
+        INSERT INTO organization_memberships (user_id, organization_id, is_active)
+        VALUES (%s, %s, TRUE) ON CONFLICT (user_id, organization_id) DO NOTHING
+        """,
+        (student_a["id"], login_a["user"]["organization_id"])
+    )
+    db_execute(
+        """
+        INSERT INTO organization_memberships (user_id, organization_id, is_active)
+        VALUES (%s, %s, TRUE) ON CONFLICT (user_id, organization_id) DO NOTHING
+        """,
+        (student_b["id"], login_b["user"]["organization_id"])
+    )
+
+
     # Student login tokens
     login_st_a = client.post("/auth/login", json={"email": student_a["email"], "password": "StudentPassA@123"}).json()
     login_st_b = client.post("/auth/login", json={"email": student_b["email"], "password": "StudentPassB@123"}).json()

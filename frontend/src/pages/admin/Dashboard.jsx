@@ -1,16 +1,37 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import AdminLayout from '../../layouts/AdminLayout';
+import { useAuth } from '../../context/AuthContext';
 import { getAdminDashboard } from '../../services/api';
-import { LoadingPage, Alert, Badge } from '../../components/ui';
+import { LoadingPage, Alert } from '../../components/ui';
 
-function formatDate(iso) {
-  if (!iso) return '04:50 PM';
-  const d = new Date(iso);
-  return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+// Avatar color classes cycle
+const AVATAR_COLORS = ['', 'green', 'blue', 'orange', 'pink'];
+
+function getInitials(name = '') {
+  return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || '??';
 }
 
+function relativeTime(iso) {
+  if (!iso) return 'just now';
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (diff < 60) return `${Math.round(diff)} secs ago`;
+  if (diff < 3600) return `${Math.round(diff / 60)} mins ago`;
+  if (diff < 86400) return `${Math.round(diff / 3600)} hours ago`;
+  return `${Math.round(diff / 86400)} days ago`;
+}
+
+const COURSE_THUMB_GRADIENTS = [
+  'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+  'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
+  'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
+  'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)',
+  'linear-gradient(135deg, #fa709a 0%, #fee140 100%)',
+  'linear-gradient(135deg, #a18cd1 0%, #fbc2eb 100%)',
+];
+
 export default function AdminDashboard() {
+  const { user } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -33,7 +54,7 @@ export default function AdminDashboard() {
   if (loading) {
     return (
       <AdminLayout>
-        <div className="page-container"><LoadingPage message="Loading dashboard & live analytics…" /></div>
+        <LoadingPage message="Loading dashboard…" />
       </AdminLayout>
     );
   }
@@ -42,232 +63,219 @@ export default function AdminDashboard() {
   const courses = data?.courses ?? [];
   const attempts = data?.recent_quiz_attempts ?? [];
 
-  // Calculate statistics for the 6 cards matching screenshot
   const totalCourses = s.total_courses ?? courses.length;
   const totalStudents = s.total_students ?? 0;
   const totalEnrollments = s.total_enrollments ?? 0;
-  
-  // Calculate average quiz score
   const avgScore = attempts.length > 0
     ? Math.round(attempts.reduce((acc, curr) => acc + (curr.score || 0), 0) / attempts.length)
     : 0;
-
-  // Completion rate calculation
   const passCount = attempts.filter(a => a.passed).length;
   const completionRate = attempts.length > 0 ? Math.round((passCount / attempts.length) * 100) : 0;
   const totalCerts = s.total_certificates ?? 0;
 
+  const firstName = user?.name?.split(' ')[0] ?? 'Admin';
+
   return (
     <AdminLayout>
-      <div className="page-container">
-        {/* TOP SUBHEADER & MAIN HEADER */}
-        <div className="dashboard-top-header">
-          <div>
-            <div className="dashboard-category-badge">
-              <span className="icon">📊</span> INSTRUCTOR &amp; ADMIN COMMAND CENTER
-            </div>
-            <h1 className="dashboard-main-title">Training &amp; Assessment Dashboard</h1>
-            <p className="dashboard-main-subtitle">
-              Manage course curriculum, video/text modules, quizzes, student user assignments, and monitor real-time completion analytics.
-            </p>
-          </div>
+      {/* Page Header */}
+      <div className="sm-page-header">
+        <div>
+          <h1 className="sm-page-title">Dashboard Overview</h1>
+          <p className="sm-page-subtitle">
+            Welcome back, <strong>{firstName}</strong>. Here's what's happening today.
+          </p>
+        </div>
+        <div className="sm-header-actions">
+          <Link to="/admin/students" className="btn btn-outline" id="manage-users-btn">
+            👥 User Manager
+          </Link>
+          <Link to="/admin/courses?tab=assign" className="btn btn-outline" id="assign-courses-btn">
+            📋 Assign Courses
+          </Link>
+          <Link to="/admin/courses" className="btn btn-primary" id="new-course-btn">
+            + Manage Courses
+          </Link>
+        </div>
+      </div>
 
-          <div className="dashboard-header-actions">
-            <Link to="/admin/assignments" className="btn btn-outline" id="manage-users-btn">
-              👥 Manage Users &amp; Assign
-            </Link>
-            <Link to="/admin/courses" className="btn btn-primary" id="new-course-btn">
-              + New Course
-            </Link>
+      {error && <Alert type="error" onClose={() => setError('')}>{error}</Alert>}
+
+      {/* Stat Cards — 3 columns matching reference */}
+      <div className="sm-stats-row">
+        {/* Total Courses */}
+        <div className="sm-stat-card">
+          <div className="sm-stat-card-top">
+            <div className="sm-stat-icon blue">📖</div>
+            <span className="sm-trend-badge up">+12%</span>
           </div>
+          <div className="sm-stat-value">{totalCourses.toLocaleString()}</div>
+          <div className="sm-stat-label">Total Courses</div>
         </div>
 
-        {error && <Alert type="error" onClose={() => setError('')}>{error}</Alert>}
-
-        {/* 6 STAT CARDS ROW */}
-        <div className="command-stats-grid">
-          {/* Card 1: COURSES */}
-          <div className="command-stat-card">
-            <div className="stat-header">
-              <span className="stat-label">COURSES</span>
-              <div className="stat-icon-wrap blue">📖</div>
-            </div>
-            <div className="stat-value">{totalCourses}</div>
-            <div className="stat-sub">Curriculum tracks</div>
+        {/* Active Students */}
+        <div className="sm-stat-card">
+          <div className="sm-stat-card-top">
+            <div className="sm-stat-icon violet">👥</div>
+            <span className="sm-trend-badge up">+15.4%</span>
           </div>
-
-          {/* Card 2: STUDENTS */}
-          <div className="command-stat-card">
-            <div className="stat-header">
-              <span className="stat-label">STUDENTS</span>
-              <div className="stat-icon-wrap purple">👥</div>
-            </div>
-            <div className="stat-value">{totalStudents}</div>
-            <div className="stat-sub">Registered learners</div>
-          </div>
-
-          {/* Card 3: ASSIGNMENTS */}
-          <div className="command-stat-card">
-            <div className="stat-header">
-              <span className="stat-label">ASSIGNMENTS</span>
-              <div className="stat-icon-wrap cyan">📈</div>
-            </div>
-            <div className="stat-value">{totalEnrollments}</div>
-            <div className="stat-sub">Invite-only seats</div>
-          </div>
-
-          {/* Card 4: AVG QUIZ SCORE */}
-          <div className="command-stat-card">
-            <div className="stat-header">
-              <span className="stat-label">AVG QUIZ SCORE</span>
-              <div className="stat-icon-wrap orange">🏅</div>
-            </div>
-            <div className="stat-value highlight-orange">{avgScore}%</div>
-            <div className="stat-sub">Across all attempts</div>
-          </div>
-
-          {/* Card 5: COMPLETION RATE */}
-          <div className="command-stat-card">
-            <div className="stat-header">
-              <span className="stat-label">COMPLETION RATE</span>
-              <div className="stat-icon-wrap green">✅</div>
-            </div>
-            <div className="stat-value highlight-green">{completionRate}%</div>
-            <div className="stat-sub">Modules passed</div>
-          </div>
-
-          {/* Card 6: CERTIFICATES */}
-          <div className="command-stat-card">
-            <div className="stat-header">
-              <span className="stat-label">CERTIFICATES</span>
-              <div className="stat-icon-wrap yellow">🛡️</div>
-            </div>
-            <div className="stat-value">{totalCerts}</div>
-            <div className="stat-sub">Minted credentials</div>
-          </div>
+          <div className="sm-stat-value">{totalStudents.toLocaleString()}</div>
+          <div className="sm-stat-label">Active Users</div>
         </div>
 
-        {/* SPLIT LAYOUT: COURSES TABLE (LEFT) + LIVE ACTIVITY STREAM (RIGHT) */}
-        <div className="dashboard-split-grid">
-          {/* LEFT WIDE CARD: Courses & Module Curriculums */}
-          <div className="dashboard-card main-table-card">
-            <div className="card-header-styled">
-              <div>
-                <div className="card-title-with-icon">
-                  <span>📖</span> Courses &amp; Module Curriculums
-                </div>
-                <p className="card-subtitle-styled">
-                  Configure module content, text/video materials, quiz questions, and passing thresholds.
-                </p>
-              </div>
-              <span className="badge badge-primary">{courses.length} Active Courses</span>
-            </div>
+        {/* Avg Completion Rate */}
+        <div className="sm-stat-card">
+          <div className="sm-stat-card-top">
+            <div className="sm-stat-icon teal">🎯</div>
+            <span className={`sm-trend-badge ${completionRate > 0 ? 'up' : 'neutral'}`}>
+              {completionRate > 0 ? `+${completionRate}%` : '0%'}
+            </span>
+          </div>
+          <div className="sm-stat-value">{completionRate}%</div>
+          <div className="sm-stat-label">Avg. Completion Rate</div>
+        </div>
 
-            {courses.length === 0 ? (
-              <div className="card-body" style={{ padding: 'var(--space-6)', textAlign: 'center' }}>
-                <p className="text-gray text-sm">No active courses configured. <Link to="/admin/courses">Create a course →</Link></p>
+        {/* Enrollments */}
+        <div className="sm-stat-card">
+          <div className="sm-stat-card-top">
+            <div className="sm-stat-icon orange">📈</div>
+            <span className="sm-trend-badge up">+8%</span>
+          </div>
+          <div className="sm-stat-value">{totalEnrollments.toLocaleString()}</div>
+          <div className="sm-stat-label">Enrollments</div>
+        </div>
+
+        {/* Avg Quiz Score */}
+        <div className="sm-stat-card">
+          <div className="sm-stat-card-top">
+            <div className="sm-stat-icon amber">🏅</div>
+            <span className={`sm-trend-badge ${avgScore >= 70 ? 'up' : 'down'}`}>
+              {avgScore}%
+            </span>
+          </div>
+          <div className="sm-stat-value">{avgScore}%</div>
+          <div className="sm-stat-label">Avg. Quiz Score</div>
+        </div>
+
+        {/* Certificates */}
+        <div className="sm-stat-card">
+          <div className="sm-stat-card-top">
+            <div className="sm-stat-icon green">🛡️</div>
+            <span className="sm-trend-badge up">+{totalCerts > 0 ? Math.ceil(totalCerts * 0.08) : 0}</span>
+          </div>
+          <div className="sm-stat-value">{totalCerts.toLocaleString()}</div>
+          <div className="sm-stat-label">Certificates Issued</div>
+        </div>
+      </div>
+
+      {/* Two Column: Courses table + Activity Feed */}
+      <div className="sm-two-col">
+        {/* Left: Courses table */}
+        <div className="sm-card">
+          <div className="sm-card-header">
+            <div>
+              <div className="sm-card-title">📖 Courses &amp; Curriculums</div>
+              <div className="sm-card-subtitle">{courses.length} active courses configured</div>
+            </div>
+            <Link to="/admin/courses" className="btn btn-outline btn-sm">View all</Link>
+          </div>
+
+          {courses.length === 0 ? (
+            <div className="sm-card-body" style={{ textAlign: 'center', color: 'var(--gray-500)', fontSize: 'var(--font-size-sm)' }}>
+              No courses yet. <Link to="/admin/courses">Create your first course →</Link>
+            </div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table className="custom-dashboard-table">
+                <thead>
+                  <tr>
+                    <th>COURSE</th>
+                    <th>MODULES</th>
+                    <th>PASS %</th>
+                    <th>ACTIONS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {courses.slice(0, 8).map((c, i) => (
+                    <tr key={c.id}>
+                      <td>
+                        <div className="course-title-cell">
+                          <div
+                            className="course-cell-icon"
+                            style={{
+                              background: COURSE_THUMB_GRADIENTS[i % COURSE_THUMB_GRADIENTS.length],
+                              color: '#fff',
+                              fontSize: '0.85rem',
+                            }}
+                          >
+                            {i % 3 === 0 ? '💻' : i % 3 === 1 ? '🔒' : '📊'}
+                          </div>
+                          <div>
+                            <Link to={`/admin/courses/${c.id}`} className="course-cell-title">
+                              {c.title}
+                            </Link>
+                            <div className="course-cell-sub">
+                              {c.is_active ? 'Published' : 'Inactive'}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td>
+                        <span className="font-semibold">{c.total_modules}</span>
+                      </td>
+                      <td>
+                        <span className="font-bold" style={{ color: 'var(--primary)' }}>70%</span>
+                      </td>
+                      <td>
+                        <div className="action-buttons-group">
+                          <Link to={`/admin/courses/${c.id}`} className="action-icon-btn" title="View">
+                            👁️
+                          </Link>
+                          <Link to={`/admin/courses/${c.id}`} className="action-icon-btn" title="Edit">
+                            ✏️
+                          </Link>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Right: Recent Activity */}
+        <div className="sm-card">
+          <div className="sm-card-header">
+            <div>
+              <div className="sm-card-title">Recent Activity</div>
+              <div className="sm-card-subtitle">Latest learner events</div>
+            </div>
+          </div>
+          <div className="sm-card-body">
+            {attempts.length === 0 ? (
+              <div style={{ textAlign: 'center', color: 'var(--gray-400)', fontSize: 'var(--font-size-sm)', padding: '1.5rem 0' }}>
+                No recent activity yet.
               </div>
             ) : (
-              <div className="table-responsive-wrap">
-                <table className="custom-dashboard-table">
-                  <thead>
-                    <tr>
-                      <th>COURSE TITLE</th>
-                      <th>CATEGORY</th>
-                      <th>MODULES</th>
-                      <th>ACCESS</th>
-                      <th>PASS %</th>
-                      <th>ACTIONS</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {courses.map((c, i) => (
-                      <tr key={c.id}>
-                        <td>
-                          <div className="course-title-cell">
-                            <div className="course-cell-icon">
-                              {i % 2 === 0 ? '💻' : '🔒'}
-                            </div>
-                            <div>
-                              <Link to={`/admin/courses/${c.id}`} className="course-cell-title">
-                                {c.title}
-                              </Link>
-                              <div className="course-cell-sub">
-                                Beginner • {c.total_modules * 4}h
-                              </div>
-                            </div>
-                          </div>
-                        </td>
-                        <td>
-                          <span className="pill-tag category">
-                            {i % 2 === 0 ? 'Software Engineering' : 'Cybersecurity'}
-                          </span>
-                        </td>
-                        <td>
-                          <span className="font-semibold">{c.total_modules}</span>
-                        </td>
-                        <td>
-                          <span className="pill-tag access">Public</span>
-                        </td>
-                        <td>
-                          <span className="font-bold text-primary">70%</span>
-                        </td>
-                        <td>
-                          <div className="action-buttons-group">
-                            <Link to={`/admin/courses/${c.id}`} className="action-icon-btn" title="Manage Course">
-                              👁️
-                            </Link>
-                            <Link to={`/admin/courses/${c.id}`} className="action-icon-btn" title="Edit Builder">
-                              ✏️
-                            </Link>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          {/* RIGHT SIDEBAR CARD: Live Activity Stream */}
-          <div className="dashboard-card stream-card">
-            <div className="card-header-styled">
-              <div className="card-title-with-icon">
-                <span>🕒</span> Live Activity Stream
-              </div>
-            </div>
-
-            <div className="activity-stream-list">
-              {attempts.length === 0 ? (
-                <div style={{ padding: 'var(--space-6)', textAlign: 'center', color: 'var(--gray-500)', fontSize: 'var(--font-size-sm)' }}>
-                  No recent activity records.
-                </div>
-              ) : (
-                attempts.slice(0, 8).map((a) => (
-                  <div key={a.attempt_id} className="stream-item">
-                    <div className="stream-item-top">
-                      <span className="stream-user-name">{a.student_name}</span>
-                      <span className={`stream-score-pill ${a.passed ? 'pass' : 'fail'}`}>
-                        {a.score}%
-                      </span>
+              <div className="sm-activity-list">
+                {attempts.slice(0, 8).map((a, i) => (
+                  <div key={a.attempt_id} className="sm-activity-item">
+                    <div className={`sm-activity-avatar ${AVATAR_COLORS[i % AVATAR_COLORS.length]}`}>
+                      {getInitials(a.student_name)}
                     </div>
-
-                    <div className="stream-action-text">
-                      {a.passed ? 'Completed Quiz & Module' : 'Attempted Quiz'}
-                    </div>
-
-                    <div className="stream-quiz-title truncate">
-                      {a.quiz_title}
-                    </div>
-
-                    <div className="stream-timestamp">
-                      {formatDate(a.attempted_at)}
+                    <div className="sm-activity-content">
+                      <div className="sm-activity-text">
+                        <strong>{a.student_name}</strong>{' '}
+                        {a.passed ? 'completed' : 'attempted'}{' '}
+                        <span className="sm-activity-link">{a.quiz_title}</span>
+                        {' '}— scored <strong>{a.score}%</strong>
+                      </div>
+                      <div className="sm-activity-time">{relativeTime(a.attempted_at)}</div>
                     </div>
                   </div>
-                ))
-              )}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>

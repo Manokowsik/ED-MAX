@@ -22,6 +22,22 @@ export default function CertificateVerify() {
   const [loading, setLoading] = useState(true);
   const [cert, setCert] = useState(null);
   const [notFound, setNotFound] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  function handleShare() {
+    const url = window.location.href;
+    if (navigator.share) {
+      navigator.share({
+        title: `Certificate of Completion - ${cert?.student_name || 'Student'}`,
+        text: `Check out ${cert?.student_name || 'Student'}'s verified certificate for ${cert?.course_title || 'Course'} on ED-MAX!`,
+        url: url,
+      }).catch(() => {});
+    } else if (navigator.clipboard) {
+      navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 3000);
+    }
+  }
 
   useEffect(() => {
     if (!certNumber) return;
@@ -144,14 +160,25 @@ export default function CertificateVerify() {
       </div>
 
       {/* Actions */}
-      <div className="no-print" style={{ display: 'flex', justifyContent: 'center', gap: 'var(--space-4)', marginTop: 'var(--space-6)' }}>
+      <div className="no-print" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 'var(--space-4)', marginTop: 'var(--space-6)', flexWrap: 'wrap' }}>
         <button
           type="button"
           className="btn btn-primary btn-lg"
           onClick={() => window.print()}
-          id="print-cert-btn"
+          id="download-cert-btn"
+          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
         >
-          🖨️ Print Certificate
+          <span>📥</span> Download Certificate (PDF)
+        </button>
+
+        <button
+          type="button"
+          className="btn btn-outline btn-lg"
+          onClick={handleShare}
+          id="share-cert-btn"
+          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: '#fff' }}
+        >
+          <span>{copied ? '✓' : '🔗'}</span> {copied ? 'Link Copied!' : 'Share Certificate'}
         </button>
       </div>
     </>

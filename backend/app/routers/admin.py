@@ -43,13 +43,17 @@ def get_admin_dashboard(
                     WHERE organization_id = %s)                             AS total_courses,
                 (SELECT COUNT(*) FROM courses
                     WHERE is_active = TRUE AND organization_id = %s)        AS active_courses,
-                (SELECT COUNT(*) FROM users
-                    WHERE LOWER(role) = 'student'
-                    AND organization_id = %s)                               AS total_students,
-                (SELECT COUNT(*) FROM users
-                    WHERE LOWER(role) = 'student'
-                    AND is_active = TRUE
-                    AND organization_id = %s)                               AS active_students,
+                (SELECT COUNT(DISTINCT u.id) FROM users u
+                    JOIN organization_memberships om ON om.user_id = u.id
+                    WHERE LOWER(u.role) = 'student'
+                    AND om.organization_id = %s
+                    AND om.is_active = TRUE)                                AS total_students,
+                (SELECT COUNT(DISTINCT u.id) FROM users u
+                    JOIN organization_memberships om ON om.user_id = u.id
+                    WHERE LOWER(u.role) = 'student'
+                    AND u.is_active = TRUE
+                    AND om.organization_id = %s
+                    AND om.is_active = TRUE)                                AS active_students,
                 (SELECT COUNT(*) FROM enrollments e
                     JOIN courses c ON c.id = e.course_id
                     WHERE c.organization_id = %s)                           AS total_enrollments,
@@ -202,100 +206,222 @@ def create_student(
     student_data: CreateStudentRequest,
     current_user: dict = Depends(require_admin)
 ):
+    """
+    Create or add a student to the admin's organization.
+
+    Scenarios:
+      1. Email doesn't exist → create new user, membership, send activation email.
+      2. Email exists, role=STUDENT, NOT yet in this org → add membership, send org invitation.
+      3. Email exists, role=STUDENT, already in this org → return descriptive message (400).
+      4. Email exists, role != STUDENT → 400 (do NOT convert non-student accounts).
+    """
     org_id = current_user["organization_id"]
 
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
-
-        # ----------------------------------------------------
-        # Check Email
-        # ----------------------------------------------------
+        # ------------------------------------------------
+        # Normalize email (case-insensitive lookup)
+        # ------------------------------------------------
+        normalized_email = student_data.email.strip().lower()
 
         cursor.execute(
             """
-            SELECT id
+            SELECT id, name, email, role, is_active, is_verified, organization_id, deleted_at
             FROM users
-            WHERE email = %s
+            WHERE LOWER(email) = %s
             """,
-            (student_data.email,)
+            (normalized_email,)
         )
+        existing = cursor.fetchone()
 
-        if cursor.fetchone():
+        # ------------------------------------------------
+        # Resolve org name (needed for invitation emails)
+        # ------------------------------------------------
+        cursor.execute(
+            "SELECT name FROM organizations WHERE id = %s",
+            (org_id,)
+        )
+        org_row = cursor.fetchone()
+        org_name = org_row[0] if org_row else "your organization"
 
-            raise HTTPException(
-                status_code=400,
-                detail="Email already exists"
+        if existing:
+            user_id   = existing[0]
+            user_name = existing[1]
+            user_email = existing[2]
+            user_role  = existing[3].upper()
+
+            # --- Scenario 4: Non-student account ---
+            if user_role != "STUDENT":
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "An account with this email already exists with a different role. "
+                        "Contact your administrator."
+                    )
+                )
+
+            # --- Check existing org membership ---
+            cursor.execute(
+                """
+                SELECT is_active FROM organization_memberships
+                WHERE user_id = %s AND organization_id = %s
+                """,
+                (user_id, org_id)
+            )
+            membership = cursor.fetchone()
+
+            if membership and membership[0]:
+                # --- Scenario 3: Already an active member of this org ---
+                if student_data.course_id:
+                    from app.services.enrollment_service import enroll_student_in_course, notify_enrollment
+                    status_res, enrollment = enroll_student_in_course(
+                        cursor,
+                        student_id=user_id,
+                        course_id=student_data.course_id,
+                        org_id=org_id
+                    )
+                    if status_res == "course_not_found":
+                        raise HTTPException(status_code=404, detail="Course not found or inactive")
+
+                    conn.commit()
+                    notify_enrollment(
+                        conn,
+                        student={"id": user_id, "name": user_name, "email": user_email, "organization_id": org_id},
+                        actor_name=current_user.get("name") or "Administrator",
+                        course_id=student_data.course_id,
+                        course_title=enrollment["course_title"],
+                        send_email=existing[4],  # only email if already active
+                    )
+                    msg = (
+                        f"Student enrolled in {enrollment['course_title']}."
+                        if status_res == "created"
+                        else f"Student is already enrolled in {enrollment['course_title']}."
+                    )
+                    return {
+                        "message": msg,
+                        "already_existed": True,
+                        "enrolled": status_res == "created",
+                        "student": {
+                            "id": user_id, "name": user_name, "email": user_email,
+                            "role": existing[3], "is_active": existing[4], "is_verified": existing[5]
+                        },
+                        "enrollment": enrollment
+                    }
+
+                raise HTTPException(
+                    status_code=400,
+                    detail="This student is already part of your organization."
+                )
+
+            # --- Scenario 2: Existing student, NOT yet in this org ---
+            # Insert (or reactivate) the membership row
+            cursor.execute(
+                """
+                INSERT INTO organization_memberships (user_id, organization_id, is_active, joined_at)
+                VALUES (%s, %s, TRUE, CURRENT_TIMESTAMP)
+                ON CONFLICT (user_id, organization_id)
+                DO UPDATE SET is_active = TRUE, joined_at = CURRENT_TIMESTAMP
+                """,
+                (user_id, org_id)
             )
 
+            enrollment_info = None
+            if student_data.course_id:
+                from app.services.enrollment_service import enroll_student_in_course
+                _, enrollment_info = enroll_student_in_course(
+                    cursor,
+                    student_id=user_id,
+                    course_id=student_data.course_id,
+                    org_id=org_id
+                )
 
-        # ----------------------------------------------------
-        # Store a locked password hash — no password is set until the student
-        # completes activation. The empty string cannot be verified by pwdlib
-        # as a valid credential, so the account is effectively locked.
-        # Admin never enters or sees any password.
-        # ----------------------------------------------------
+            conn.commit()
 
-        hashed_password = password_hash.hash("")  # placeholder; overwritten at activation
+            # Send org invitation email (no password needed — account already exists)
+            from app.services.auth_service import AuthService
+            email_sent = True
+            try:
+                AuthService.create_org_invitation(
+                    conn,
+                    user_id=user_id,
+                    org_id=org_id,
+                    name=user_name,
+                    email=user_email,
+                    org_name=org_name,
+                )
+                logger.info(f"[ORG INVITE] Sent org invitation to {user_email} for org {org_id}")
+            except Exception as e:
+                email_sent = False
+                logger.error(f"[ORG INVITE ERROR] Failed to send org invitation to {user_email}: {e}")
 
+            msg = (
+                "An organization invitation has been sent to the student."
+                if email_sent
+                else "Student added to your organization, but the invitation email could not be sent."
+            )
+            return {
+                "message": msg,
+                "already_existed": True,
+                "invitation_sent": email_sent,
+                "student": {
+                    "id": user_id, "name": user_name, "email": user_email,
+                    "role": existing[3], "is_active": existing[4], "is_verified": existing[5]
+                },
+                "enrollment": enrollment_info
+            }
 
-        # ----------------------------------------------------
-        # Create Student (bound to admin's organization)
-        # Account created in inactive / unverified state pending activation
-        # ----------------------------------------------------
+        # ------------------------------------------------
+        # Scenario 1: Brand-new user — create account + membership
+        # ------------------------------------------------
+
+        # Locked password placeholder; overwritten at activation
+        hashed_password = password_hash.hash("")
 
         cursor.execute(
             """
             INSERT INTO users
-            (
-                name,
-                email,
-                password_hash,
-                role,
-                is_active,
-                is_verified,
-                organization_id
-            )
+                (name, email, password_hash, role, is_active, is_verified, organization_id)
             VALUES
-            (
-                %s,
-                %s,
-                %s,
-                'STUDENT',
-                FALSE,
-                FALSE,
-                %s
-            )
-            RETURNING
-                id,
-                name,
-                email,
-                role,
-                is_active,
-                is_verified
+                (%s, %s, %s, 'STUDENT', FALSE, FALSE, %s)
+            RETURNING id, name, email, role, is_active, is_verified
             """,
-            (
-                student_data.name,
-                student_data.email,
-                hashed_password,
-                org_id
-            )
+            (student_data.name.strip(), normalized_email, hashed_password, org_id)
         )
-
         student = cursor.fetchone()
-        conn.commit()
-
-        # Generate activation token and attempt sending invitation email
-        from app.services.auth_service import AuthService
-        email_sent = True
-        student_id = student[0]
-        student_name = student[1]
+        student_id    = student[0]
+        student_name  = student[1]
         student_email = student[2]
 
-        print(f"\n[STUDENT CREATE] Name: {student_name}", flush=True)
-        print(f"[STUDENT CREATE] Recipient email: {student_email}", flush=True)
-        logger.info(f"[STUDENT CREATE] Name: {student_name} | Recipient email: {student_email}")
+        # Insert org membership
+        cursor.execute(
+            """
+            INSERT INTO organization_memberships (user_id, organization_id, is_active, joined_at)
+            VALUES (%s, %s, TRUE, CURRENT_TIMESTAMP)
+            ON CONFLICT (user_id, organization_id) DO NOTHING
+            """,
+            (student_id, org_id)
+        )
+
+        enrollment_info = None
+        if student_data.course_id:
+            from app.services.enrollment_service import enroll_student_in_course
+            _, enrollment_info = enroll_student_in_course(
+                cursor,
+                student_id=student_id,
+                course_id=student_data.course_id,
+                org_id=org_id
+            )
+
+        conn.commit()
+
+        # Send activation email
+        from app.services.auth_service import AuthService
+        from app.services.enrollment_service import notify_invitation
+        email_sent = True
+
+        logger.info(f"[STUDENT CREATE] Name: {student_name} | Email: {student_email}")
 
         try:
             AuthService.create_student_activation(
@@ -304,44 +430,40 @@ def create_student(
                 name=student_name,
                 email=student_email
             )
+            notify_invitation(
+                conn,
+                student={"id": student_id, "name": student_name, "email": student_email, "organization_id": org_id},
+                actor_name=current_user.get("name") or "Administrator"
+            )
         except Exception as e:
             email_sent = False
-            logger.error(f"[SMTP ERROR] Failed to send activation email during student creation for {student_email}: {e}")
+            logger.error(f"[SMTP ERROR] Failed to send activation email for {student_email}: {e}")
 
-        if email_sent:
-            msg = "Student created successfully. An activation email has been sent."
-        else:
-            msg = "Student created, but the activation email could not be sent. Please resend the activation email."
+        msg = (
+            "Student created successfully. An activation email has been sent."
+            if email_sent
+            else "Student created, but the activation email could not be sent. Please resend the activation email."
+        )
 
         return {
             "message": msg,
             "email_sent": email_sent,
             "student": {
-                "id": student[0],
-                "name": student[1],
-                "email": student[2],
-                "role": student[3],
-                "is_active": student[4],
-                "is_verified": student[5]
-            }
+                "id": student[0], "name": student[1], "email": student[2],
+                "role": student[3], "is_active": student[4], "is_verified": student[5]
+            },
+            "enrollment": enrollment_info
         }
 
     except HTTPException:
-
         conn.rollback()
         raise
 
     except Exception as e:
-
         conn.rollback()
-
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to create student: {e}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to create student: {e}")
 
     finally:
-
         cursor.close()
         conn.close()
 
@@ -360,48 +482,41 @@ def get_students(
     cursor = conn.cursor()
 
     try:
-
+        # Use organization_memberships as the authoritative org-user link
         cursor.execute(
             """
             SELECT
-                id,
-                name,
-                email,
-                role,
-                is_active
-            FROM users
-            WHERE LOWER(role) = 'student'
-            AND organization_id = %s
-            ORDER BY id
+                u.id,
+                u.name,
+                u.email,
+                u.role,
+                u.is_active
+            FROM users u
+            JOIN organization_memberships om ON om.user_id = u.id
+            WHERE LOWER(u.role) = 'student'
+              AND om.organization_id = %s
+              AND om.is_active = TRUE
+            ORDER BY u.id
             """,
             (org_id,)
         )
 
         students = cursor.fetchall()
 
+        result = [
+            {
+                "id": s[0],
+                "name": s[1],
+                "email": s[2],
+                "role": s[3],
+                "is_active": s[4]
+            }
+            for s in students
+        ]
 
-        result = []
-
-        for student in students:
-
-            result.append(
-                {
-                    "id": student[0],
-                    "name": student[1],
-                    "email": student[2],
-                    "role": student[3],
-                    "is_active": student[4]
-                }
-            )
-
-
-        return {
-            "students": result
-        }
-
+        return {"students": result}
 
     finally:
-
         cursor.close()
         conn.close()
 
@@ -423,19 +538,18 @@ def get_student_assigned_courses(
     try:
 
         # ----------------------------------------------------
-        # Check Student belongs to this admin's org
+        # Check Student belongs to this admin's org via membership
         # ----------------------------------------------------
 
         cursor.execute(
             """
-            SELECT
-                id,
-                name,
-                email
-            FROM users
-            WHERE id = %s
-            AND LOWER(role) = 'student'
-            AND organization_id = %s
+            SELECT u.id, u.name, u.email
+            FROM users u
+            JOIN organization_memberships om ON om.user_id = u.id
+            WHERE u.id = %s
+              AND LOWER(u.role) = 'student'
+              AND om.organization_id = %s
+              AND om.is_active = TRUE
             """,
             (student_id, org_id)
         )
@@ -530,23 +644,34 @@ def activate_student(
 
     try:
 
+        # Verify student belongs to this org (via membership) before updating
+        cursor.execute(
+            """
+            SELECT u.id FROM users u
+            JOIN organization_memberships om ON om.user_id = u.id
+            WHERE u.id = %s
+              AND LOWER(u.role) = 'student'
+              AND om.organization_id = %s
+              AND om.is_active = TRUE
+            """,
+            (student_id, org_id)
+        )
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Student not found")
+
         cursor.execute(
             """
             UPDATE users
             SET is_active = TRUE
-            WHERE id = %s
-            AND LOWER(role) = 'student'
-            AND organization_id = %s
+            WHERE id = %s AND LOWER(role) = 'student'
             RETURNING id, name, email, is_active
             """,
-            (student_id, org_id)
+            (student_id,)
         )
 
         student = cursor.fetchone()
 
-
         if not student:
-
             raise HTTPException(
                 status_code=404,
                 detail="Student not found"
@@ -606,23 +731,34 @@ def deactivate_student(
 
     try:
 
+        # Verify student belongs to this org (via membership) before updating
+        cursor.execute(
+            """
+            SELECT u.id FROM users u
+            JOIN organization_memberships om ON om.user_id = u.id
+            WHERE u.id = %s
+              AND LOWER(u.role) = 'student'
+              AND om.organization_id = %s
+              AND om.is_active = TRUE
+            """,
+            (student_id, org_id)
+        )
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Student not found")
+
         cursor.execute(
             """
             UPDATE users
             SET is_active = FALSE
-            WHERE id = %s
-            AND LOWER(role) = 'student'
-            AND organization_id = %s
+            WHERE id = %s AND LOWER(role) = 'student'
             RETURNING id, name, email, is_active
             """,
-            (student_id, org_id)
+            (student_id,)
         )
 
         student = cursor.fetchone()
 
-
         if not student:
-
             raise HTTPException(
                 status_code=404,
                 detail="Student not found"

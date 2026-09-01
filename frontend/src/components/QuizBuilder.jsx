@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   createQuiz, createQuestion, createOption,
   updateQuiz, deleteQuiz,
@@ -81,6 +81,13 @@ export default function QuizBuilder({ moduleId, quiz: existingQuiz, onQuizCreate
   const [success, setSuccess] = useState('');
   const [confirmDeleteQuiz, setConfirmDeleteQuiz] = useState(false);
   const [deletingQuiz, setDeletingQuiz] = useState(false);
+  const errorRef = useRef(null);
+
+  useEffect(() => {
+    if (error && errorRef.current) {
+      errorRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [error]);
 
   // ============================================================
   // Question helpers
@@ -572,6 +579,12 @@ export default function QuizBuilder({ moduleId, quiz: existingQuiz, onQuizCreate
               </div>
             </div>
           ))}
+        </div>
+
+        {/* Error / Success Alert above Footer */}
+        <div ref={errorRef} style={{ marginTop: 'var(--space-4)' }}>
+          {error && <Alert type="error" onClose={() => setError('')}>{error}</Alert>}
+          {success && <Alert type="success">{success}</Alert>}
         </div>
 
         {/* FOOTER */}

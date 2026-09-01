@@ -10,6 +10,7 @@ import VerifyEmail from './pages/VerifyEmail';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import ActivateAccount from './pages/ActivateAccount';
+import AcceptInvitation from './pages/AcceptInvitation';
 import NotFound from './pages/NotFound';
 
 // Admin
@@ -27,6 +28,9 @@ import StudentCourses from './pages/student/Courses';
 import CourseLearning from './pages/student/CourseLearning';
 import StudentCertificates from './pages/student/Certificates';
 
+// Common / Account
+import AccountSettings from './pages/AccountSettings';
+
 // Public
 import CertificateVerify from './pages/CertificateVerify';
 
@@ -35,6 +39,13 @@ function RootRedirect() {
   if (!isAuthenticated) return <Navigate to="/login" replace />;
   if (isAdmin) return <Navigate to="/admin/dashboard" replace />;
   return <Navigate to="/student/dashboard" replace />;
+}
+
+function SettingsRedirect() {
+  const { isAuthenticated, isAdmin } = useAuth();
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (isAdmin) return <Navigate to="/admin/settings" replace />;
+  return <Navigate to="/student/settings" replace />;
 }
 
 function AppRoutes() {
@@ -54,6 +65,8 @@ function AppRoutes() {
       {/* Legacy path formats kept for backward compatibility */}
       <Route path="/activate" element={<ActivateAccount />} />
       <Route path="/activate/:token" element={<ActivateAccount />} />
+      {/* Org invitation accept (existing user → new org) */}
+      <Route path="/accept-invitation" element={<AcceptInvitation />} />
 
 
       {/* =====================================================
@@ -134,7 +147,27 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <RoleRoute roles={['ADMIN']}>
-              <AdminAssignments />
+              <Navigate to="/admin/courses?tab=assign" replace />
+            </RoleRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/settings"
+        element={
+          <ProtectedRoute>
+            <RoleRoute roles={['ADMIN']}>
+              <AccountSettings />
+            </RoleRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/profile"
+        element={
+          <ProtectedRoute>
+            <RoleRoute roles={['ADMIN']}>
+              <AccountSettings />
             </RoleRoute>
           </ProtectedRoute>
         }
@@ -190,6 +223,44 @@ function AppRoutes() {
             <RoleRoute roles={['STUDENT']}>
               <StudentCertificates />
             </RoleRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/student/settings"
+        element={
+          <ProtectedRoute>
+            <RoleRoute roles={['STUDENT']}>
+              <AccountSettings />
+            </RoleRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/student/profile"
+        element={
+          <ProtectedRoute>
+            <RoleRoute roles={['STUDENT']}>
+              <AccountSettings />
+            </RoleRoute>
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Common account redirects */}
+      <Route
+        path="/settings"
+        element={
+          <ProtectedRoute>
+            <SettingsRedirect />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/profile"
+        element={
+          <ProtectedRoute>
+            <SettingsRedirect />
           </ProtectedRoute>
         }
       />

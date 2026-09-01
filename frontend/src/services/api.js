@@ -278,6 +278,21 @@ export async function resendActivation(email) {
 }
 
 
+// GET /auth/validate-invitation-token
+export async function validateInvitationToken(token) {
+  return apiRequest(`/auth/validate-invitation-token?token=${encodeURIComponent(token)}`);
+}
+
+
+// POST /auth/accept-invitation
+export async function acceptInvitation(token) {
+  return apiRequest("/auth/accept-invitation", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}
+
+
 // =====================================================
 // ADMIN DASHBOARD
 // =====================================================
@@ -292,13 +307,17 @@ export async function getAdminDashboard() {
 // ADMIN - STUDENTS
 // =====================================================
 
-// POST /admin/students  — sends JSON body (name + email only; no password)
-export async function createStudent(name, email) {
+// POST /admin/students  — sends JSON body (name + email + optional course_id)
+export async function createStudent(name, email, courseId = null) {
+  const payload = { name, email };
+  if (courseId) {
+    payload.course_id = Number(courseId);
+  }
   return apiRequest(
     "/admin/students",
     {
       method: "POST",
-      body: JSON.stringify({ name, email }),
+      body: JSON.stringify(payload),
     }
   );
 }
@@ -722,6 +741,82 @@ export async function getStudentCertificates(studentId) {
 // GET /certificates/verify/{certificate_number}  — public, no auth
 export async function verifyCertificate(certificateNumber) {
   return apiRequest(`/certificates/verify/${encodeURIComponent(certificateNumber)}`);
+}
+
+
+// =====================================================
+// USER PROFILE & ACCOUNT SETTINGS
+// =====================================================
+
+// GET /users/me
+export async function getProfile() {
+  return apiRequest("/users/me");
+}
+
+// PATCH /users/me
+export async function updateProfile(name) {
+  return apiRequest(
+    "/users/me",
+    {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    }
+  );
+}
+
+// POST /users/me/change-password
+export async function changePassword(currentPassword, newPassword, confirmPassword) {
+  return apiRequest(
+    "/users/me/change-password",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        current_password: currentPassword,
+        new_password: newPassword,
+        confirm_password: confirmPassword,
+      }),
+    }
+  );
+}
+
+// DELETE /users/me
+export async function deleteAccount(confirmation, currentPassword) {
+  return apiRequest(
+    "/users/me",
+    {
+      method: "DELETE",
+      body: JSON.stringify({
+        confirmation,
+        current_password: currentPassword,
+      }),
+    }
+  );
+}
+
+
+// =====================================================
+// NOTIFICATIONS
+// =====================================================
+
+// GET /users/me/notifications
+export async function getNotifications(limit = 50) {
+  return apiRequest(`/users/me/notifications?limit=${limit}`);
+}
+
+// PATCH /users/me/notifications/{id}/read
+export async function markNotificationRead(notificationId) {
+  return apiRequest(
+    `/users/me/notifications/${notificationId}/read`,
+    { method: "PATCH" }
+  );
+}
+
+// POST /users/me/notifications/read-all
+export async function markAllNotificationsRead() {
+  return apiRequest(
+    "/users/me/notifications/read-all",
+    { method: "POST" }
+  );
 }
 
 

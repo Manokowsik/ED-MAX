@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import AdminLayout from '../../layouts/AdminLayout';
 import {
   getStudents,
+  getCourses,
   createStudent,
   activateStudent,
   deactivateStudent,
@@ -22,6 +23,7 @@ function validateStudent(name, email) {
 
 export default function AdminStudents() {
   const [students, setStudents] = useState([]);
+  const [courses, setCourses] = useState([]);
   const [filtered, setFiltered] = useState([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -30,7 +32,7 @@ export default function AdminStudents() {
 
   // Create student form
   const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState({ name: '', email: '' });
+  const [form, setForm] = useState({ name: '', email: '', courseId: '' });
   const [formError, setFormError] = useState('');
   const [creating, setCreating] = useState(false);
 
@@ -42,8 +44,9 @@ export default function AdminStudents() {
     setLoading(true);
     setError('');
     try {
-      const res = await getStudents();
-      setStudents(res.students ?? []);
+      const [stRes, cRes] = await Promise.all([getStudents(), getCourses()]);
+      setStudents(stRes.students ?? []);
+      setCourses(cRes.courses ?? []);
     } catch (err) {
       setError(err.message || 'Failed to load students');
     } finally {
@@ -70,10 +73,10 @@ export default function AdminStudents() {
 
     setCreating(true);
     try {
-      await createStudent(form.name.trim(), form.email.trim());
+      const res = await createStudent(form.name.trim(), form.email.trim(), form.courseId || null);
       setShowCreate(false);
-      setForm({ name: '', email: '' });
-      setSuccess('Student created successfully. An activation email has been sent.');
+      setForm({ name: '', email: '', courseId: '' });
+      setSuccess(res.message || 'Student saved successfully.');
       await load();
     } catch (err) {
       setFormError(err.message || 'Failed to create student');
@@ -242,6 +245,23 @@ export default function AdminStudents() {
                 <label className="form-label" htmlFor="s-email">Email</label>
                 <input id="s-email" type="email" className="form-input" value={form.email}
                   onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="jane@example.com" required />
+              </div>
+              <div className="form-group" style={{ marginTop: '1rem' }}>
+                <label className="form-label" htmlFor="s-course">Enroll in Course (Optional)</label>
+                <select
+                  id="s-course"
+                  className="form-input"
+                  value={form.courseId}
+                  onChange={e => setForm(f => ({ ...f, courseId: e.target.value }))}
+                >
+                  <option value="">-- None / Select later --</option>
+                  {courses.filter(c => c.is_active).map(c => (
+                    <option key={c.id} value={c.id}>{c.title}</option>
+                  ))}
+                </select>
+                <span style={{ fontSize: '0.75rem', color: 'var(--gray-500)', marginTop: '0.35rem', display: 'block' }}>
+                  If this student is already registered, selecting a course will immediately enroll them and notify them via email.
+                </span>
               </div>
             </form>
 

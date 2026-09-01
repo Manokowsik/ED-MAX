@@ -90,6 +90,7 @@ def admin_signup(signup_data: AdminSignupRequest):
                 password_hash,
                 role,
                 is_active,
+                is_verified,
                 organization_id
             )
             VALUES
@@ -99,6 +100,7 @@ def admin_signup(signup_data: AdminSignupRequest):
                 %s,
                 'ADMIN',
                 TRUE,
+                FALSE,
                 %s
             )
             RETURNING
@@ -106,7 +108,8 @@ def admin_signup(signup_data: AdminSignupRequest):
                 name,
                 email,
                 role,
-                is_active
+                is_active,
+                is_verified
             """,
             (
                 signup_data.name.strip(),
@@ -118,6 +121,15 @@ def admin_signup(signup_data: AdminSignupRequest):
 
         user = cursor.fetchone()
 
+        # Generate and dispatch email verification OTP
+        from app.services.auth_service import AuthService
+        AuthService.create_email_verification(
+            conn,
+            user_id=user[0],
+            name=user[1],
+            email=user[2]
+        )
+
         conn.commit()
 
 
@@ -126,16 +138,19 @@ def admin_signup(signup_data: AdminSignupRequest):
         # ----------------------------------------------------
 
         return {
-            "message": "Admin account created successfully",
+            "message": "Admin account created successfully. Please verify your email with the OTP sent to your registered email address.",
+            "requires_verification": True,
             "user": {
                 "id": user[0],
                 "name": user[1],
                 "email": user[2],
                 "role": user[3],
                 "is_active": user[4],
+                "is_verified": user[5],
                 "organization_id": organization_id
             }
         }
+
 
 
     except HTTPException:

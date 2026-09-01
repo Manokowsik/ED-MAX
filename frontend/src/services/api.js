@@ -203,6 +203,81 @@ export async function adminSignup(name, email, password, confirmPassword) {
 }
 
 
+// POST /auth/verify-email
+export async function verifyEmail(email, otp) {
+  return apiRequest("/auth/verify-email", {
+    method: "POST",
+    body: JSON.stringify({ email, otp }),
+  });
+}
+
+
+// POST /auth/resend-otp
+export async function resendOtp(email) {
+  return apiRequest("/auth/resend-otp", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+
+// POST /auth/forgot-password
+export async function forgotPassword(email) {
+  return apiRequest("/auth/forgot-password", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+
+// GET /auth/validate-reset-token
+export async function validateResetToken(token) {
+  return apiRequest(`/auth/validate-reset-token?token=${encodeURIComponent(token)}`);
+}
+
+
+// POST /auth/reset-password
+export async function resetPassword(token, password, confirmPassword) {
+  return apiRequest("/auth/reset-password", {
+    method: "POST",
+    body: JSON.stringify({
+      token,
+      password,
+      confirm_password: confirmPassword,
+    }),
+  });
+}
+
+
+// GET /auth/validate-activation-token
+export async function validateActivationToken(token) {
+  return apiRequest(`/auth/validate-activation-token?token=${encodeURIComponent(token)}`);
+}
+
+
+// POST /auth/activate-account
+// Note: backend does NOT return tokens after activation; student must log in normally.
+export async function activateAccount(token, password, confirmPassword) {
+  return apiRequest("/auth/activate-account", {
+    method: "POST",
+    body: JSON.stringify({
+      token,
+      password,
+      confirm_password: confirmPassword,
+    }),
+  });
+}
+
+
+// POST /auth/resend-activation
+export async function resendActivation(email) {
+  return apiRequest("/auth/resend-activation", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+
 // =====================================================
 // ADMIN DASHBOARD
 // =====================================================
@@ -217,13 +292,13 @@ export async function getAdminDashboard() {
 // ADMIN - STUDENTS
 // =====================================================
 
-// POST /admin/students  — sends JSON body
-export async function createStudent(name, email, password) {
+// POST /admin/students  — sends JSON body (name + email only; no password)
+export async function createStudent(name, email) {
   return apiRequest(
     "/admin/students",
     {
       method: "POST",
-      body: JSON.stringify({ name, email, password }),
+      body: JSON.stringify({ name, email }),
     }
   );
 }

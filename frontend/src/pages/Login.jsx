@@ -20,6 +20,9 @@ export default function Login() {
     sessionStorage.removeItem('auth_error');
   }
 
+  const infoMessage = location.state?.message || '';
+  const isUnverifiedError = error.toLowerCase().includes('not verified');
+
   async function handleLogin(e) {
     e.preventDefault();
     setError('');
@@ -45,6 +48,8 @@ export default function Login() {
     } catch (err) {
       if (err.message?.includes('401') || err.message === 'Invalid email or password') {
         setError('Invalid email or password. Please try again.');
+      } else if (err.message?.toLowerCase().includes('not verified')) {
+        setError('Email not verified. Please verify your email before logging in.');
       } else if (err.message?.toLowerCase().includes('network') || err.message?.toLowerCase().includes('fetch')) {
         setError('Unable to connect to the server. Please check your connection.');
       } else {
@@ -67,7 +72,20 @@ export default function Login() {
 
         {/* Form */}
         <form onSubmit={handleLogin} noValidate>
+          {infoMessage && <Alert type="success">{infoMessage}</Alert>}
           {error && <Alert type="error" onClose={() => setError('')}>{error}</Alert>}
+
+          {isUnverifiedError && (
+            <div style={{ marginBottom: '1rem', textAlign: 'center' }}>
+              <button
+                type="button"
+                className="btn btn-outline btn-sm"
+                onClick={() => navigate('/verify-email', { state: { email: email.trim() } })}
+              >
+                Verify your email now →
+              </button>
+            </div>
+          )}
 
           <div className="form-group">
             <label className="form-label" htmlFor="email">Email address</label>
@@ -85,7 +103,12 @@ export default function Login() {
           </div>
 
           <div className="form-group">
-            <label className="form-label" htmlFor="password">Password</label>
+            <div className="flex justify-between items-center mb-1">
+              <label className="form-label" htmlFor="password" style={{ margin: 0 }}>Password</label>
+              <Link to="/forgot-password" style={{ fontSize: '0.8125rem', color: 'var(--primary)', fontWeight: 500, textDecoration: 'none' }}>
+                Forgot password?
+              </Link>
+            </div>
             <input
               id="password"
               type="password"

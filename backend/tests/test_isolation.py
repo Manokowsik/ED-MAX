@@ -41,6 +41,9 @@ def env_setup(client):
     })
     assert res_b.status_code == 201
 
+    # Mark admins verified in DB for login
+    db_execute("UPDATE users SET is_verified = TRUE WHERE email IN (%s, %s)", (email_a, email_b))
+
     # Login both to get tokens
     login_a = client.post("/auth/login", json={"email": email_a, "password": "PasswordA@123"}).json()
     login_b = client.post("/auth/login", json={"email": email_b, "password": "PasswordB@123"}).json()
@@ -49,10 +52,10 @@ def env_setup(client):
     headers_b = {"Authorization": f"Bearer {login_b['access_token']}"}
 
     # 2. Admin A creates Student A, Admin B creates Student B
+    # No password is specified — activation-based flow. Set password directly in DB for testing.
     res_st_a = client.post("/admin/students", headers=headers_a, json={
         "name": "Student A",
         "email": f"student_a_{uuid.uuid4().hex[:6]}@example.com",
-        "password": "StudentPassA@123"
     })
     assert res_st_a.status_code == 200
     student_a = res_st_a.json()["student"]
@@ -60,10 +63,19 @@ def env_setup(client):
     res_st_b = client.post("/admin/students", headers=headers_b, json={
         "name": "Student B",
         "email": f"student_b_{uuid.uuid4().hex[:6]}@example.com",
-        "password": "StudentPassB@123"
     })
     assert res_st_b.status_code == 200
     student_b = res_st_b.json()["student"]
+
+    # Bypass email activation for test setup: set known passwords and mark students active/verified
+    db_execute(
+        "UPDATE users SET password_hash = %s, is_active = TRUE, is_verified = TRUE WHERE id = %s",
+        (password_hash.hash("StudentPassA@123"), student_a["id"])
+    )
+    db_execute(
+        "UPDATE users SET password_hash = %s, is_active = TRUE, is_verified = TRUE WHERE id = %s",
+        (password_hash.hash("StudentPassB@123"), student_b["id"])
+    )
 
     # Student login tokens
     login_st_a = client.post("/auth/login", json={"email": student_a["email"], "password": "StudentPassA@123"}).json()
@@ -71,6 +83,7 @@ def env_setup(client):
 
     headers_st_a = {"Authorization": f"Bearer {login_st_a['access_token']}"}
     headers_st_b = {"Authorization": f"Bearer {login_st_b['access_token']}"}
+
 
     # 3. Admin A creates Course A, Admin B creates Course B
     res_ca = client.post("/courses/", headers=headers_a, json={"title": "Course A", "description": "Desc A"})

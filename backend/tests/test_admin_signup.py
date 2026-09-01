@@ -27,7 +27,7 @@ def _unique_email():
 class TestAdminSignupSuccess:
 
     def test_successful_admin_signup(self, client):
-        """A valid signup request creates an admin user and returns 201."""
+        """A valid signup request creates an admin user and returns 201 with unverified state."""
         email = _unique_email()
 
         response = client.post("/auth/admin-signup", json={
@@ -40,11 +40,12 @@ class TestAdminSignupSuccess:
         assert response.status_code == 201
         data = response.json()
 
-        assert data["message"] == "Admin account created successfully"
+        assert "Admin account created" in data["message"]
         assert data["user"]["email"] == email
         assert data["user"]["name"] == "New Admin"
         assert data["user"]["role"] == "ADMIN"
         assert data["user"]["is_active"] is True
+        assert data["user"]["is_verified"] is False
         assert "password" not in data["user"]
         assert "password_hash" not in data["user"]
 
@@ -102,8 +103,30 @@ class TestAdminSignupSuccess:
         # Cleanup
         db_execute("DELETE FROM users WHERE email = %s", (email,))
 
-    def test_newly_created_admin_can_login(self, client):
-        """After signup, the admin can log in via /auth/login."""
+    def test_unverified_admin_login_rejected(self, client):
+        """Before email verification, login is rejected with 403."""
+        email = _unique_email()
+        password = "SecurePass@123"
+
+        client.post("/auth/admin-signup", json={
+            "name": "Unverified Admin",
+            "email": email,
+            "password": password,
+            "confirm_password": password
+        })
+
+        login_resp = client.post("/auth/login", json={
+            "email": email,
+            "password": password
+        })
+        assert login_resp.status_code == 403
+        assert "not verified" in login_resp.json()["detail"].lower()
+
+        # Cleanup
+        db_execute("DELETE FROM users WHERE email = %s", (email,))
+
+    def test_newly_created_admin_can_login_after_verification(self, client):
+        """After signup and OTP verification, the admin can log in via /auth/login."""
         email = _unique_email()
         password = "SecurePass@123"
 
@@ -113,6 +136,20 @@ class TestAdminSignupSuccess:
             "password": password,
             "confirm_password": password
         })
+
+        # Fetch created user id and OTP verification record
+        user_rows = db_execute("SELECT id FROM users WHERE email = %s", (email,), fetch=True)
+        user_id = user_rows[0][0]
+
+        ver_rows = db_execute(
+            "SELECT id FROM email_verifications WHERE user_id = %s",
+            (user_id,),
+            fetch=True
+        )
+        assert len(ver_rows) >= 1
+
+        # Direct DB mark or verification endpoint test
+        db_execute("UPDATE users SET is_verified = TRUE WHERE id = %s", (user_id,))
 
         login_response = client.post("/auth/login", json={
             "email": email,
@@ -126,6 +163,7 @@ class TestAdminSignupSuccess:
 
         # Cleanup
         db_execute("DELETE FROM users WHERE email = %s", (email,))
+
 
 
 # ============================================================

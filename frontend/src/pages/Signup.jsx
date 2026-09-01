@@ -84,20 +84,21 @@ export default function Signup() {
           </div>
 
           <div style={styles.successBox}>
-            <div style={styles.successIcon}>✓</div>
+            <div style={styles.successIcon}>📧</div>
             <h2 style={styles.successTitle}>Account Created!</h2>
             <p style={styles.successText}>
-              Your admin account has been created successfully. You can now sign in with your credentials.
+              Your admin account has been created. A verification code (OTP) has been sent to <strong>{email}</strong>.
             </p>
             <button
-              id="goto-login-btn"
+              id="goto-verify-btn"
               className="btn btn-primary btn-full btn-lg"
               style={{ marginTop: 'var(--space-4)' }}
-              onClick={() => navigate('/login')}
+              onClick={() => navigate('/verify-email', { state: { email: email.trim() } })}
             >
-              Go to Sign In
+              Verify Email Now
             </button>
           </div>
+
         </div>
       </div>
     );

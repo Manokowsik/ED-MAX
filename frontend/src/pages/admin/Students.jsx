@@ -12,14 +12,13 @@ import {
   Modal, ConfirmModal, Spinner,
 } from '../../components/ui';
 
-function validateStudent(name, email, password) {
+function validateStudent(name, email) {
   if (!name.trim()) return 'Name is required.';
   if (!email.trim()) return 'Email is required.';
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'Please enter a valid email.';
-  if (!password) return 'Password is required.';
-  if (password.length < 6) return 'Password must be at least 6 characters.';
   return null;
 }
+
 
 export default function AdminStudents() {
   const [students, setStudents] = useState([]);
@@ -31,7 +30,7 @@ export default function AdminStudents() {
 
   // Create student form
   const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState({ name: '', email: '', password: '' });
+  const [form, setForm] = useState({ name: '', email: '' });
   const [formError, setFormError] = useState('');
   const [creating, setCreating] = useState(false);
 
@@ -66,15 +65,15 @@ export default function AdminStudents() {
   async function handleCreate(e) {
     e.preventDefault();
     setFormError('');
-    const err = validateStudent(form.name, form.email, form.password);
+    const err = validateStudent(form.name, form.email);
     if (err) { setFormError(err); return; }
 
     setCreating(true);
     try {
-      await createStudent(form.name.trim(), form.email.trim(), form.password);
+      await createStudent(form.name.trim(), form.email.trim());
       setShowCreate(false);
-      setForm({ name: '', email: '', password: '' });
-      setSuccess('Student created successfully.');
+      setForm({ name: '', email: '' });
+      setSuccess('Student created successfully. An activation email has been sent.');
       await load();
     } catch (err) {
       setFormError(err.message || 'Failed to create student');
@@ -219,7 +218,7 @@ export default function AdminStudents() {
         {showCreate && (
           <Modal
             title="Add New Student"
-            onClose={() => { setShowCreate(false); setFormError(''); setForm({ name: '', email: '', password: '' }); }}
+            onClose={() => { setShowCreate(false); setFormError(''); setForm({ name: '', email: '' }); }}
             footer={
               <>
                 <button className="btn btn-outline" onClick={() => setShowCreate(false)} disabled={creating}>Cancel</button>
@@ -231,6 +230,9 @@ export default function AdminStudents() {
           >
             {formError && <Alert type="error">{formError}</Alert>}
             <form id="create-student-form" onSubmit={handleCreate} noValidate>
+              <p style={{ fontSize: '0.875rem', color: 'var(--gray-600)', marginBottom: '1rem' }}>
+                An invitation email with an activation link will be sent to the student. They will set their own password during activation.
+              </p>
               <div className="form-group">
                 <label className="form-label" htmlFor="s-name">Full Name</label>
                 <input id="s-name" type="text" className="form-input" value={form.name}
@@ -241,12 +243,8 @@ export default function AdminStudents() {
                 <input id="s-email" type="email" className="form-input" value={form.email}
                   onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="jane@example.com" required />
               </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="s-pass">Password</label>
-                <input id="s-pass" type="password" className="form-input" value={form.password}
-                  onChange={e => setForm(f => ({ ...f, password: e.target.value }))} placeholder="Minimum 6 characters" required />
-              </div>
             </form>
+
           </Modal>
         )}
 

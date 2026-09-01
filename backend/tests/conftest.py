@@ -215,3 +215,36 @@ def test_enrollment(student_user, test_course):
         "DELETE FROM enrollments WHERE student_id = %s AND course_id = %s",
         (student_user["id"], test_course["id"])
     )
+
+
+# ============================================================
+# Email Mock Fixture
+# ============================================================
+
+@pytest.fixture(autouse=True)
+def email_mock(monkeypatch):
+    """
+    Monkeypatches EmailService._send_email to prevent real emails being sent
+    during pytest. Captured emails can be inspected in tests.
+
+    Usage:
+        def test_something(client, admin_user, email_mock):
+            client.post(...)
+            assert len(email_mock) == 1
+            assert "activate-account" in email_mock[0]["body"]
+    """
+    from app.services.email_service import EmailService
+
+    captured = []
+
+    def _fake_send(to_email, subject, body, html_body=None):
+        captured.append({
+            "to": to_email,
+            "subject": subject,
+            "body": body,
+            "html_body": html_body or "",
+        })
+        return True
+
+    monkeypatch.setattr(EmailService, "_send_email", staticmethod(_fake_send))
+    return captured

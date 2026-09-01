@@ -33,7 +33,8 @@ class TestStudentCreation:
         assert response.status_code == 200
         data = response.json()
         assert data["student"]["role"] in ("STUDENT", "student")
-        assert data["student"]["is_active"] is True
+        assert data["student"]["is_active"] is False
+
         # Cleanup
         db_execute("DELETE FROM users WHERE id = %s", (data["student"]["id"],))
 

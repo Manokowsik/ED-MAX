@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, HTTPException, Depends
 from pwdlib import PasswordHash
 
@@ -5,6 +6,7 @@ from app.db.database import get_connection
 from app.schemas.user import CreateStudentRequest
 from app.core.security import require_admin
 
+logger = logging.getLogger("admin_router")
 
 router = APIRouter(
     prefix="/admin",
@@ -188,6 +190,9 @@ def get_admin_dashboard(
         conn.close()
 
 
+
+
+
 # ============================================================
 # Create Student (scoped to admin's organization)
 # ============================================================
@@ -226,16 +231,18 @@ def create_student(
 
 
         # ----------------------------------------------------
-        # Hash Password
+        # Store a locked password hash — no password is set until the student
+        # completes activation. The empty string cannot be verified by pwdlib
+        # as a valid credential, so the account is effectively locked.
+        # Admin never enters or sees any password.
         # ----------------------------------------------------
 
-        hashed_password = password_hash.hash(
-            student_data.password
-        )
+        hashed_password = password_hash.hash("")  # placeholder; overwritten at activation
 
 
         # ----------------------------------------------------
         # Create Student (bound to admin's organization)
+        # Account created in inactive / unverified state pending activation
         # ----------------------------------------------------
 
         cursor.execute(
@@ -247,6 +254,7 @@ def create_student(
                 password_hash,
                 role,
                 is_active,
+                is_verified,
                 organization_id
             )
             VALUES
@@ -255,7 +263,8 @@ def create_student(
                 %s,
                 %s,
                 'STUDENT',
-                TRUE,
+                FALSE,
+                FALSE,
                 %s
             )
             RETURNING
@@ -263,7 +272,8 @@ def create_student(
                 name,
                 email,
                 role,
-                is_active
+                is_active,
+                is_verified
             """,
             (
                 student_data.name,
@@ -274,28 +284,52 @@ def create_student(
         )
 
         student = cursor.fetchone()
-
         conn.commit()
 
+        # Generate activation token and attempt sending invitation email
+        from app.services.auth_service import AuthService
+        email_sent = True
+        student_id = student[0]
+        student_name = student[1]
+        student_email = student[2]
+
+        print(f"\n[STUDENT CREATE] Name: {student_name}", flush=True)
+        print(f"[STUDENT CREATE] Recipient email: {student_email}", flush=True)
+        logger.info(f"[STUDENT CREATE] Name: {student_name} | Recipient email: {student_email}")
+
+        try:
+            AuthService.create_student_activation(
+                conn,
+                user_id=student_id,
+                name=student_name,
+                email=student_email
+            )
+        except Exception as e:
+            email_sent = False
+            logger.error(f"[SMTP ERROR] Failed to send activation email during student creation for {student_email}: {e}")
+
+        if email_sent:
+            msg = "Student created successfully. An activation email has been sent."
+        else:
+            msg = "Student created, but the activation email could not be sent. Please resend the activation email."
 
         return {
-            "message": "Student created successfully",
-
+            "message": msg,
+            "email_sent": email_sent,
             "student": {
                 "id": student[0],
                 "name": student[1],
                 "email": student[2],
                 "role": student[3],
-                "is_active": student[4]
+                "is_active": student[4],
+                "is_verified": student[5]
             }
         }
-
 
     except HTTPException:
 
         conn.rollback()
         raise
-
 
     except Exception as e:
 
@@ -303,9 +337,8 @@ def create_student(
 
         raise HTTPException(
             status_code=500,
-            detail="Failed to create student"
+            detail=f"Failed to create student: {e}"
         )
-
 
     finally:
 

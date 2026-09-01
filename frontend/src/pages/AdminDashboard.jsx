@@ -154,56 +154,37 @@ export default function AdminDashboard() {
   // ===================================================
 
   async function handleCreateStudent(e) {
-
     e.preventDefault();
 
-    if (
-      !studentName.trim() ||
-      !studentEmail.trim() ||
-      !studentPassword.trim()
-    ) {
-
-      alert("Please fill all student fields.");
-
+    if (!studentName.trim() || !studentEmail.trim()) {
+      alert("Please enter both student name and email.");
       return;
     }
 
-
     try {
-
       setCreatingStudent(true);
 
-      await createStudent(
-        studentName,
-        studentEmail,
-        studentPassword
+      const res = await createStudent(
+        studentName.trim(),
+        studentEmail.trim()
       );
 
-
-      alert("Student created successfully.");
-
+      alert(res.message || "Student created successfully. An activation email has been sent.");
 
       // Clear form
-
       setStudentName("");
       setStudentEmail("");
-      setStudentPassword("");
-
 
       // Reload dashboard
-
       await loadDashboard();
 
     } catch (err) {
-
       alert(
         err.message || "Failed to create student"
       );
 
     } finally {
-
       setCreatingStudent(false);
-
     }
   }
 
@@ -619,21 +600,6 @@ export default function AdminDashboard() {
                   setStudentEmail(e.target.value)
                 }
                 placeholder="student@example.com"
-                style={styles.input}
-              />
-
-
-              <label style={styles.label}>
-                Password
-              </label>
-
-              <input
-                type="password"
-                value={studentPassword}
-                onChange={(e) =>
-                  setStudentPassword(e.target.value)
-                }
-                placeholder="Password"
                 style={styles.input}
               />
 

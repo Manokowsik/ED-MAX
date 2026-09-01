@@ -6,6 +6,10 @@ import RoleRoute from './components/RoleRoute';
 // Pages
 import Login from './pages/Login';
 import Signup from './pages/Signup';
+import VerifyEmail from './pages/VerifyEmail';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
+import ActivateAccount from './pages/ActivateAccount';
 import NotFound from './pages/NotFound';
 
 // Admin
@@ -42,6 +46,15 @@ function AppRoutes() {
       {/* Auth */}
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
+      <Route path="/verify-email" element={<VerifyEmail />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
+      {/* /activate-account?token=... is the canonical spec URL */}
+      <Route path="/activate-account" element={<ActivateAccount />} />
+      {/* Legacy path formats kept for backward compatibility */}
+      <Route path="/activate" element={<ActivateAccount />} />
+      <Route path="/activate/:token" element={<ActivateAccount />} />
+
 
       {/* =====================================================
           ADMIN ROUTES

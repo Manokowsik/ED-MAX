@@ -3,7 +3,17 @@ from fastapi import APIRouter, HTTPException, Response, Request
 from pwdlib import PasswordHash
 
 from app.db.database import get_connection
-from app.schemas.auth import LoginRequest
+from app.schemas.auth import (
+    LoginRequest,
+    VerifyOTPRequest,
+    ResendOTPRequest,
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
+    ActivateAccountRequest,
+    ResendActivationRequest,
+    TestEmailRequest,
+)
+from app.services.auth_service import AuthService
 from app.core.config import APP_ENV, REFRESH_TOKEN_EXPIRE_DAYS
 from app.core.security import create_access_token, create_refresh_token, decode_token
 
@@ -50,7 +60,8 @@ def login(login_data: LoginRequest, response: Response):
                 email,
                 password_hash,
                 role,
-                organization_id
+                organization_id,
+                is_verified
             FROM users
             WHERE email = %s
             AND is_active = TRUE
@@ -77,6 +88,12 @@ def login(login_data: LoginRequest, response: Response):
         raise HTTPException(
             status_code=401,
             detail="Invalid email or password"
+        )
+
+    if not user[6]:
+        raise HTTPException(
+            status_code=403,
+            detail="Email not verified. Please verify your email before logging in."
         )
 
     access_token = create_access_token(
@@ -117,6 +134,124 @@ def login(login_data: LoginRequest, response: Response):
             "organization_id": user[5]
         }
     }
+
+
+# ============================================================
+# Email Verification (OTP)
+# ============================================================
+
+@router.post("/verify-email")
+def verify_email(data: VerifyOTPRequest):
+    conn = get_connection()
+    try:
+        return AuthService.verify_email_otp(conn, data.email, data.otp)
+    finally:
+        conn.close()
+
+
+@router.post("/resend-otp")
+def resend_otp(data: ResendOTPRequest):
+    conn = get_connection()
+    try:
+        return AuthService.resend_email_otp(conn, data.email)
+    finally:
+        conn.close()
+
+
+# ============================================================
+# Forgot & Reset Password
+# ============================================================
+
+@router.post("/forgot-password")
+def forgot_password(data: ForgotPasswordRequest):
+    conn = get_connection()
+    try:
+        return AuthService.request_password_reset(conn, data.email)
+    finally:
+        conn.close()
+
+
+@router.get("/validate-reset-token")
+def validate_reset_token(token: str):
+    conn = get_connection()
+    try:
+        return AuthService.validate_reset_token(conn, token)
+    finally:
+        conn.close()
+
+
+@router.post("/reset-password")
+def reset_password(data: ResetPasswordRequest):
+    conn = get_connection()
+    try:
+        return AuthService.reset_password(
+            conn,
+            token=data.token,
+            password=data.password,
+            confirm_password=data.confirm_password
+        )
+    finally:
+        conn.close()
+
+
+# ============================================================
+# Student Account Activation
+# ============================================================
+
+@router.get("/validate-activation-token")
+def validate_activation_token(token: str):
+    conn = get_connection()
+    try:
+        return AuthService.validate_activation_token(conn, token)
+    finally:
+        conn.close()
+
+
+@router.post("/activate-account")
+def activate_account(data: ActivateAccountRequest):
+    conn = get_connection()
+    try:
+        result = AuthService.activate_student_account(
+            conn,
+            token=data.token,
+            password=data.password,
+            confirm_password=data.confirm_password
+        )
+        # No session cookie is set — the student must log in normally after activation.
+        return result
+    finally:
+        conn.close()
+
+
+@router.post("/resend-activation")
+def resend_activation(data: ResendActivationRequest):
+    """Resend activation email for a pending student account.
+
+    Always returns a generic success message to prevent email enumeration.
+    Rate-limited by a per-user cooldown window.
+    """
+    conn = get_connection()
+    try:
+        return AuthService.resend_student_activation(conn, data.email)
+    finally:
+        conn.close()
+
+
+@router.post("/test-email")
+def test_email(data: TestEmailRequest):
+    """
+    Diagnostic endpoint to test real SMTP email delivery.
+    Sends a test email to the specified address and returns success only if SMTP delivery succeeds.
+    """
+    from app.services.email_service import EmailService
+    try:
+        success = EmailService.send_test_email(data.email)
+        if success:
+            return {"message": f"SMTP test email sent successfully to {data.email}"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to send test email")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/refresh")
@@ -212,3 +347,4 @@ def logout(response: Response):
         samesite=cookie_opts["samesite"],
     )
     return {"message": "Logged out successfully"}
+

@@ -3648,6 +3648,10 @@ tbody tr:hover {
    Responsive — Sidebar & Layout Breakpoints
    ============================================================ */
 
+.sv2-mobile-drawer-header {
+  display: none;
+}
+
 @media (max-width: 900px) {
   .app-layout-sidebar {
     flex-direction: column;
@@ -3657,15 +3661,79 @@ tbody tr:hover {
   }
 
   .sidebar-v2 {
-    transform: translateX(-100%);
+    position: fixed;
+    top: 0;
+    right: 0;
+    left: auto;
+    bottom: 0;
+    width: 280px;
+    max-width: 82vw;
+    height: 100vh;
+    height: 100dvh;
+    background: #ffffff;
+    z-index: 400;
+    transform: translate3d(100%, 0, 0);
+    will-change: transform;
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: -4px 0 25px rgba(0, 0, 0, 0.15);
   }
 
   .sidebar-v2.open {
-    transform: translateX(0);
+    transform: translate3d(0, 0, 0);
+  }
+
+  .sv2-mobile-drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid #f1f5f9;
+    background: #fafafa;
+  }
+
+  .sv2-mobile-drawer-title {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #0f172a;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .sv2-mobile-close-btn {
+    background: #e2e8f0;
+    border: none;
+    color: #475569;
+    font-size: 0.9rem;
+    font-weight: 700;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 150ms ease;
+  }
+
+  .sv2-mobile-close-btn:hover {
+    background: #cbd5e1;
+    color: #0f172a;
+  }
+
+  /* Hide duplicate logo and duplicate profile inside mobile drawer */
+  .sidebar-v2 .sv2-logo,
+  .sidebar-v2 .sv2-user-block {
+    display: none !important;
   }
 
   .sv2-overlay {
     display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.45);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    z-index: 350;
   }
 
   .sidebar-main-content {

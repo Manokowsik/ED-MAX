@@ -84,6 +84,17 @@ export default function SidebarNav() {
     setSidebarOpen(false);
   }
 
+  useEffect(() => {
+    if (sidebarOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [sidebarOpen]);
+
   return (
     <>
       {/* === MOBILE TOP BAR (Mobile Only) === */}
@@ -223,10 +234,23 @@ export default function SidebarNav() {
         <div className="sv2-overlay" onClick={closeSidebar} id="sidebar-overlay" />
       )}
 
-      {/* === SIDEBAR (Desktop Sticky & Mobile Drawer) === */}
+      {/* === SIDEBAR (Desktop Sticky & Mobile Drawer sliding from RIGHT) === */}
       <aside className={`sidebar-v2${sidebarOpen ? ' open' : ''}`} id="main-sidebar">
+        {/* Mobile Header (Close Button) */}
+        <div className="sv2-mobile-drawer-header">
+          <span className="sv2-mobile-drawer-title">Navigation</span>
+          <button
+            type="button"
+            className="sv2-mobile-close-btn"
+            onClick={closeSidebar}
+            aria-label="Close menu"
+            id="sidebar-close-btn"
+          >
+            ✕
+          </button>
+        </div>
 
-        {/* Logo Header */}
+        {/* Logo Header (Desktop Only) */}
         <div
           className="sv2-logo"
           onClick={() => { navigate(homePath); closeSidebar(); }}
@@ -242,7 +266,7 @@ export default function SidebarNav() {
           </div>
         </div>
 
-        {/* User Profile Info Card */}
+        {/* User Profile Info Card (Desktop Only) */}
         <div
           className="sv2-user-block"
           onClick={() => { navigate(isAdmin ? '/admin/settings' : '/student/settings'); closeSidebar(); }}

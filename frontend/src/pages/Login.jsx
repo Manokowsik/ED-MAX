@@ -184,7 +184,7 @@ export default function Login() {
   } = useLoginLogic();
 
   return (
-    <div className="login-page" style={STYLES.page}>
+    <div className="login-page">
       <div className="login-card" style={STYLES.card}>
         
         {/* Brand Header */}

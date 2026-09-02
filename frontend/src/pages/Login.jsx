@@ -189,7 +189,9 @@ export default function Login() {
         
         {/* Brand Header */}
         <header style={STYLES.brand}>
-          <div style={STYLES.brandLogo}>🎓</div>
+          <div className="login-brand-icon">
+            ⚡
+          </div>
           <h1 style={STYLES.brandName}>ED-MAX</h1>
           <p style={STYLES.brandSub}>Employee Training &amp; Learning Platform</p>
         </header>
@@ -311,12 +313,12 @@ export default function Login() {
 const STYLES = Object.freeze({
   page: {
     minHeight: '100dvh',
-    background: 'linear-gradient(135deg, #1e1b4b 0%, #4f46e5 100%)',
+    background: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #312e81 100%)',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 'clamp(0.75rem, 4vw, 1.5rem)',
+    padding: 'clamp(1rem, 4vw, 2rem)',
     width: '100%',
     boxSizing: 'border-box',
   },
@@ -324,31 +326,29 @@ const STYLES = Object.freeze({
     width: '100%',
     maxWidth: '420px',
     margin: 'auto',
-    background: '#fff',
-    padding: 'clamp(1.25rem, 5vw, 2.5rem)',
-    borderRadius: '1rem',
-    boxShadow: '0 25px 50px -12px rgba(0,0,0,0.35)',
+    background: '#ffffff',
+    padding: 'clamp(1.5rem, 5vw, 2.5rem)',
+    borderRadius: '1.25rem',
+    border: '1px solid rgba(226, 232, 240, 0.8)',
+    boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.35), 0 10px 20px -5px rgba(0, 0, 0, 0.04)',
     boxSizing: 'border-box',
   },
   brand: {
     textAlign: 'center',
-    marginBottom: '2rem',
-  },
-  brandLogo: {
-    fontSize: '3rem',
-    marginBottom: '0.5rem',
+    marginBottom: '1.75rem',
   },
   brandName: {
     fontSize: '1.75rem',
-    fontWeight: 700,
-    color: 'var(--gray-900)',
-    letterSpacing: '-0.025em',
+    fontWeight: 800,
+    color: '#0f172a',
+    letterSpacing: '-0.03em',
     margin: 0,
   },
   brandSub: {
     fontSize: '0.875rem',
-    color: 'var(--gray-500)',
-    margin: '0.25rem 0 0',
+    color: '#64748b',
+    margin: '0.35rem 0 0',
+    fontWeight: 500,
   },
   actionBox: {
     marginBottom: '1rem',
@@ -361,25 +361,30 @@ const STYLES = Object.freeze({
   forgotPasswordLink: {
     fontSize: '0.8125rem',
     color: 'var(--primary)',
-    fontWeight: 500,
+    fontWeight: 600,
     textDecoration: 'none',
+    transition: 'color 0.15s ease',
   },
   footerContainer: {
-    marginTop: '1.5rem',
+    marginTop: '1.75rem',
+    paddingTop: '1.25rem',
+    borderTop: '1px solid #f1f5f9',
   },
   footerText: {
     textAlign: 'center',
     fontSize: '0.75rem',
-    color: 'var(--gray-400)',
+    color: '#94a3b8',
+    margin: 0,
   },
   signupLink: {
     marginTop: '0.75rem',
     textAlign: 'center',
     fontSize: '0.8125rem',
-    color: 'var(--gray-500)',
+    color: '#64748b',
+    margin: '0.65rem 0 0',
   },
   primaryBoldLink: {
     color: 'var(--primary)',
-    fontWeight: 600,
+    fontWeight: 700,
   },
 });

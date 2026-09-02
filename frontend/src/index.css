@@ -4615,4 +4615,217 @@ tbody tr:hover {
   }
 }
 
+/* ============================================================
+   Student Dashboard Responsive Layout
+   ============================================================ */
+
+.sm-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.sm-page-title {
+  font-size: 1.75rem;
+  font-weight: 800;
+  color: var(--gray-900);
+  letter-spacing: -0.02em;
+  margin-bottom: 0.25rem;
+}
+
+.sm-page-subtitle {
+  color: var(--gray-500);
+  font-size: 0.925rem;
+}
+
+.sm-stats-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.sm-stat-card {
+  background: #fff;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-lg);
+  padding: 1rem 1.25rem;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.sm-stat-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.sm-stat-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+}
+
+.sm-stat-icon.blue { background: #e0e7ff; color: #4338ca; }
+.sm-stat-icon.green { background: #dcfce7; color: #15803d; }
+.sm-stat-icon.amber { background: #fef3c7; color: #b45309; }
+
+.sm-trend-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+.sm-trend-badge.neutral { background: var(--gray-100); color: var(--gray-600); }
+.sm-trend-badge.up { background: #dcfce7; color: #15803d; }
+
+.sm-stat-value {
+  font-size: 1.75rem;
+  font-weight: 800;
+  color: var(--gray-900);
+  line-height: 1.2;
+}
+
+.sm-stat-label {
+  font-size: 0.825rem;
+  color: var(--gray-500);
+  font-weight: 500;
+  margin-top: 0.25rem;
+}
+
+.sm-learning-item {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  background: var(--gray-50);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-lg);
+  margin-bottom: 0.75rem;
+}
+
+.sm-learning-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.sm-learning-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.sm-learning-title {
+  font-weight: 700;
+  color: var(--gray-900);
+  font-size: 0.975rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sm-learning-sub {
+  font-size: 0.785rem;
+  color: var(--gray-500);
+  margin-top: 0.15rem;
+  margin-bottom: 0.35rem;
+}
+
+.sm-learning-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.sm-learning-track {
+  flex: 1;
+  height: 6px;
+  background: var(--gray-200);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.sm-learning-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.sm-learning-pct {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--gray-600);
+  min-width: 32px;
+  text-align: right;
+}
+
+.sm-learning-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.45rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-light);
+  border-radius: var(--radius);
+  text-decoration: none;
+  transition: all var(--transition);
+  flex-shrink: 0;
+}
+
+.sm-learning-cta:hover {
+  background: var(--primary);
+  color: #fff;
+}
+
+@media (max-width: 640px) {
+  .sm-stats-row {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.4rem;
+  }
+
+  .sm-stat-card {
+    padding: 0.65rem 0.5rem;
+  }
+
+  .sm-stat-value {
+    font-size: 1.25rem;
+  }
+
+  .sm-stat-label {
+    font-size: 0.7rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .sm-trend-badge {
+    font-size: 0.65rem;
+    padding: 1px 4px;
+  }
+
+  .sm-learning-item {
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+}
+
 

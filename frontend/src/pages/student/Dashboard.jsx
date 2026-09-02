@@ -87,8 +87,9 @@ const ContinueLearningItem = React.memo(function ContinueLearningItem({
   const progressPct = Math.max(0, Math.min(100, Math.round(course.progress_percentage ?? 0)));
   const isCompleted = progressPct === 100;
   const ctaLabel = isCompleted ? 'Review' : progressPct > 0 ? 'Continue' : 'Start';
-  const currentModule = (course.completed_modules ?? 0) + 1;
+  const completedCount = course.completed_modules ?? 0;
   const totalModules = course.total_modules ?? 0;
+  const currentModule = isCompleted ? totalModules : Math.min(totalModules, completedCount + 1);
 
   return (
     <div className="sm-learning-item">
@@ -102,7 +103,7 @@ const ContinueLearningItem = React.memo(function ContinueLearningItem({
       <div className="sm-learning-content">
         <div className="sm-learning-title">{course.title}</div>
         <div className="sm-learning-sub">
-          Module {currentModule} of {totalModules}
+          {isCompleted ? `${totalModules} of ${totalModules} modules completed` : `Module ${currentModule} of ${totalModules}`}
         </div>
         <div className="sm-learning-progress-row">
           <div

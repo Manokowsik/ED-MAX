@@ -85,14 +85,17 @@ def get_courses(
         cursor.execute(
             """
             SELECT
-                id,
-                title,
-                description,
-                is_active,
-                created_at
-            FROM courses
-            WHERE organization_id = %s
-            ORDER BY id
+                c.id,
+                c.title,
+                c.description,
+                c.is_active,
+                c.created_at,
+                COUNT(DISTINCT e.student_id) AS enrolled_count
+            FROM courses c
+            LEFT JOIN enrollments e ON e.course_id = c.id
+            WHERE c.organization_id = %s
+            GROUP BY c.id, c.title, c.description, c.is_active, c.created_at
+            ORDER BY c.id
             """,
             (org_id,)
         )
@@ -106,7 +109,9 @@ def get_courses(
                     "title": course[1],
                     "description": course[2],
                     "is_active": course[3],
-                    "created_at": course[4]
+                    "created_at": course[4],
+                    "enrolled_count": course[5],
+                    "enrolled_students": course[5]
                 }
                 for course in courses
             ]
@@ -963,7 +968,7 @@ def assign_course(
         )
         if cursor.fetchone():
             raise HTTPException(
-                status_code=400,
+                status_code=409,
                 detail="Student is already enrolled in this course"
             )
 

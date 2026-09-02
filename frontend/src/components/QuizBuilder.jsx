@@ -120,6 +120,26 @@ export default function QuizBuilder({ moduleId, quiz: existingQuiz, onQuizCreate
     setQuestions(updated);
   }
 
+  function handleMoveQuestionUp(qIndex) {
+    if (qIndex <= 0) return;
+    const updated = [...questions];
+    const temp = updated[qIndex];
+    updated[qIndex] = updated[qIndex - 1];
+    updated[qIndex - 1] = temp;
+    updated.forEach((q, i) => { q.question_order = i + 1; });
+    setQuestions(updated);
+  }
+
+  function handleMoveQuestionDown(qIndex) {
+    if (qIndex >= questions.length - 1) return;
+    const updated = [...questions];
+    const temp = updated[qIndex];
+    updated[qIndex] = updated[qIndex + 1];
+    updated[qIndex + 1] = temp;
+    updated.forEach((q, i) => { q.question_order = i + 1; });
+    setQuestions(updated);
+  }
+
   function handleQuestionTextChange(qIndex, text) {
     const updated = [...questions];
     updated[qIndex] = { ...updated[qIndex], question_text: text };
@@ -525,55 +545,58 @@ export default function QuizBuilder({ moduleId, quiz: existingQuiz, onQuizCreate
                 {q.options.map((opt, optIdx) => (
                   <div
                     key={opt.id}
+                    className={`quiz-option-row${opt.is_correct ? ' correct' : ''}`}
                     style={{
-                      ...styles.optionRow,
                       border: opt.is_correct ? '2px solid var(--success)' : '1px solid var(--gray-300)',
                       background: opt.is_correct ? 'var(--success-light)' : '#fff',
                     }}
                   >
-                    {/* Correct Radio */}
-                    <label style={styles.radioLabel} title="Set as Correct Answer">
-                      <input
-                        type="radio"
-                        name={`correct-answer-q-${q.id}`}
-                        checked={opt.is_correct}
-                        onChange={() => handleSelectCorrectOption(qIdx, optIdx)}
-                        disabled={saving}
-                      />
-                      <span style={{ fontWeight: 700, color: opt.is_correct ? 'var(--success-text)' : 'var(--primary)' }}>
-                        Option {opt.option_label}
-                      </span>
-                    </label>
+                    <div className="quiz-option-meta-bar">
+                      {/* Correct Radio */}
+                      <label style={styles.radioLabel} title="Set as Correct Answer">
+                        <input
+                          type="radio"
+                          name={`correct-answer-q-${q.id}`}
+                          checked={opt.is_correct}
+                          onChange={() => handleSelectCorrectOption(qIdx, optIdx)}
+                          disabled={saving}
+                        />
+                        <span style={{ fontWeight: 700, color: opt.is_correct ? 'var(--success-text)' : 'var(--primary)' }}>
+                          Option {opt.option_label}
+                        </span>
+                      </label>
 
-                    {/* Option Text */}
+                      <div className="quiz-option-actions">
+                        {opt.is_correct ? (
+                          <span className="badge badge-success">✓ Correct</span>
+                        ) : (
+                          <span className="badge badge-gray">Incorrect</span>
+                        )}
+
+                        {q.options.length > 2 && (
+                          <button
+                            type="button"
+                            style={styles.removeOptBtn}
+                            onClick={() => handleRemoveOption(qIdx, optIdx)}
+                            title="Remove Option"
+                            disabled={saving}
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Option Text Input */}
                     <input
                       type="text"
-                      className="form-input"
-                      style={{ flex: 1 }}
+                      className="form-input quiz-option-input"
                       value={opt.option_text}
                       onChange={(e) => handleOptionTextChange(qIdx, optIdx, e.target.value)}
                       placeholder={`Enter text for option ${opt.option_label}`}
                       required
                       disabled={saving}
                     />
-
-                    {opt.is_correct ? (
-                      <span className="badge badge-success">✓ Correct</span>
-                    ) : (
-                      <span className="badge badge-gray">Incorrect</span>
-                    )}
-
-                    {q.options.length > 2 && (
-                      <button
-                        type="button"
-                        style={styles.removeOptBtn}
-                        onClick={() => handleRemoveOption(qIdx, optIdx)}
-                        title="Remove Option"
-                        disabled={saving}
-                      >
-                        ✕
-                      </button>
-                    )}
                   </div>
                 ))}
               </div>

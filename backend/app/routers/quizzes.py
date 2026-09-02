@@ -1,4 +1,6 @@
-from fastapi import APIRouter, HTTPException, Depends
+import logging
+from typing import Any, Dict, List, Optional, Tuple
+from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks
 
 from app.db.database import get_connection
 from app.core.security import require_admin, require_student
@@ -9,737 +11,183 @@ from app.schemas.quiz import (
     QuestionUpdateRequest,
     OptionCreateRequest,
     OptionUpdateRequest,
-    SubmitQuizRequest
+    SubmitQuizRequest,
 )
+from app.services.notification_service import NotificationService
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/quizzes", tags=["Quizzes"])
 
 
-router = APIRouter(
-    prefix="/quizzes",
-    tags=["Quizzes"]
-)
+# ============================================================================
+# TIER 1: PERSISTENCE & DATA ACCESS LAYER (Repository Pattern)
+# ============================================================================
 
+class QuizRepository:
+    """Encapsulates all raw database transactions, queries, and row-mapping."""
 
-# ============================================================
-# Create Quiz (Admin only — org-scoped)
-# ============================================================
+    def __init__(self, cursor):
+        self.cursor = cursor
 
-@router.post("/", status_code=201)
-def create_quiz(
-    quiz_data: QuizCreateRequest,
-    current_user: dict = Depends(require_admin)
-):
-    org_id = current_user["organization_id"]
+    def _fetchone_dict(self) -> Optional[Dict[str, Any]]:
+        row = self.cursor.fetchone()
+        if not row:
+            return None
+        columns = [col[0] for col in self.cursor.description]
+        return dict(zip(columns, row))
 
-    conn = get_connection()
-    cursor = conn.cursor()
+    def _fetchall_dict(self) -> List[Dict[str, Any]]:
+        columns = [col[0] for col in self.cursor.description]
+        return [dict(zip(columns, row)) for row in self.cursor.fetchall()]
 
-    try:
-        # Verify module exists and belongs to a course in admin's organization
-        cursor.execute(
+    def verify_module_in_org(self, module_id: int, org_id: int) -> bool:
+        self.cursor.execute(
             """
-            SELECT cm.id
-            FROM course_modules cm
+            SELECT 1 FROM course_modules cm
             JOIN courses c ON c.id = cm.course_id
             WHERE cm.id = %s AND c.organization_id = %s
             """,
-            (quiz_data.module_id, org_id)
+            (module_id, org_id)
         )
-        if not cursor.fetchone():
-            raise HTTPException(
-                status_code=404,
-                detail="Module not found"
-            )
+        return bool(self.cursor.fetchone())
 
-        # Validate passing_score
-        if not (0 <= quiz_data.passing_score <= 100):
-            raise HTTPException(
-                status_code=400,
-                detail="passing_score must be between 0 and 100"
-            )
+    def verify_quiz_in_org(self, quiz_id: int, org_id: int) -> bool:
+        self.cursor.execute(
+            """
+            SELECT 1 FROM quizzes q
+            JOIN course_modules cm ON cm.id = q.module_id
+            JOIN courses c ON c.id = cm.course_id
+            WHERE q.id = %s AND c.organization_id = %s
+            """,
+            (quiz_id, org_id)
+        )
+        return bool(self.cursor.fetchone())
 
-        cursor.execute(
+    def verify_question_in_org(self, question_id: int, org_id: int) -> bool:
+        self.cursor.execute(
+            """
+            SELECT 1 FROM quiz_questions qq
+            JOIN quizzes q ON q.id = qq.quiz_id
+            JOIN course_modules cm ON cm.id = q.module_id
+            JOIN courses c ON c.id = cm.course_id
+            WHERE qq.id = %s AND c.organization_id = %s
+            """,
+            (question_id, org_id)
+        )
+        return bool(self.cursor.fetchone())
+
+    def verify_option_in_org(self, option_id: int, question_id: int, org_id: int) -> bool:
+        self.cursor.execute(
+            """
+            SELECT 1
+            FROM quiz_options qo
+            JOIN quiz_questions qq ON qq.id = qo.question_id
+            JOIN quizzes q ON q.id = qq.quiz_id
+            JOIN course_modules cm ON cm.id = q.module_id
+            JOIN courses c ON c.id = cm.course_id
+            WHERE qo.id = %s AND qo.question_id = %s AND c.organization_id = %s
+            """,
+            (option_id, question_id, org_id)
+        )
+        return bool(self.cursor.fetchone())
+
+    def is_student_enrolled(self, student_id: int, course_id: int) -> bool:
+        self.cursor.execute(
+            "SELECT 1 FROM enrollments WHERE student_id = %s AND course_id = %s",
+            (student_id, course_id)
+        )
+        return bool(self.cursor.fetchone())
+
+    def insert_quiz(self, module_id: int, title: str, description: str, passing_score: int) -> Dict[str, Any]:
+        self.cursor.execute(
             """
             INSERT INTO quizzes (module_id, title, description, passing_score)
             VALUES (%s, %s, %s, %s)
             RETURNING id, module_id, title, description, passing_score, created_at
             """,
-            (
-                quiz_data.module_id,
-                quiz_data.title.strip(),
-                quiz_data.description.strip(),
-                quiz_data.passing_score
-            )
+            (module_id, title, description, passing_score)
         )
-        quiz = cursor.fetchone()
-        conn.commit()
+        return self._fetchone_dict()
 
-        return {
-            "message": "Quiz created successfully",
-            "quiz": {
-                "id": quiz[0],
-                "module_id": quiz[1],
-                "title": quiz[2],
-                "description": quiz[3],
-                "passing_score": quiz[4],
-                "created_at": quiz[5]
-            }
-        }
+    def update_quiz_fields(self, quiz_id: int, fields: List[str], values: List[Any]) -> Dict[str, Any]:
+        query = f"UPDATE quizzes SET {', '.join(fields)} WHERE id = %s RETURNING id, title, description, passing_score"
+        self.cursor.execute(query, tuple(values))
+        return self._fetchone_dict()
 
-    except HTTPException:
-        conn.rollback()
-        raise
-
-    except Exception:
-        conn.rollback()
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to create quiz"
+    def cascade_delete_quiz(self, quiz_id: int) -> None:
+        self.cursor.execute(
+            "DELETE FROM quiz_options WHERE question_id IN (SELECT id FROM quiz_questions WHERE quiz_id = %s)",
+            (quiz_id,)
         )
+        self.cursor.execute("DELETE FROM quiz_questions WHERE quiz_id = %s", (quiz_id,))
+        self.cursor.execute("DELETE FROM quizzes WHERE id = %s", (quiz_id,))
 
-    finally:
-        cursor.close()
-        conn.close()
-
-
-# ============================================================
-# Create Question (Admin only — org-scoped)
-# ============================================================
-
-@router.post("/{quiz_id}/questions", status_code=201)
-def create_question(
-    quiz_id: int,
-    question_data: QuestionCreateRequest,
-    current_user: dict = Depends(require_admin)
-):
-    org_id = current_user["organization_id"]
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    try:
-        cursor.execute(
-            """
-            SELECT q.id
-            FROM quizzes q
-            JOIN course_modules cm ON cm.id = q.module_id
-            JOIN courses c ON c.id = cm.course_id
-            WHERE q.id = %s AND c.organization_id = %s
-            """,
-            (quiz_id, org_id)
-        )
-        if not cursor.fetchone():
-            raise HTTPException(
-                status_code=404,
-                detail="Quiz not found"
-            )
-
-        cursor.execute(
+    def insert_question(self, quiz_id: int, text: str, order: int) -> Dict[str, Any]:
+        self.cursor.execute(
             """
             INSERT INTO quiz_questions (quiz_id, question_text, question_order)
             VALUES (%s, %s, %s)
             RETURNING id, quiz_id, question_text, question_order, created_at
             """,
-            (
-                quiz_id,
-                question_data.question_text.strip(),
-                question_data.question_order
-            )
+            (quiz_id, text, order)
         )
-        question = cursor.fetchone()
-        conn.commit()
+        return self._fetchone_dict()
 
-        return {
-            "message": "Question created successfully",
-            "question": {
-                "id": question[0],
-                "quiz_id": question[1],
-                "question_text": question[2],
-                "question_order": question[3],
-                "created_at": question[4]
-            }
-        }
+    def update_question_fields(self, question_id: int, fields: List[str], values: List[Any]) -> Dict[str, Any]:
+        query = f"UPDATE quiz_questions SET {', '.join(fields)} WHERE id = %s RETURNING id, question_text, question_order"
+        self.cursor.execute(query, tuple(values))
+        return self._fetchone_dict()
 
-    except HTTPException:
-        conn.rollback()
-        raise
+    def delete_question_record(self, question_id: int) -> None:
+        self.cursor.execute("DELETE FROM quiz_options WHERE question_id = %s", (question_id,))
+        self.cursor.execute("DELETE FROM quiz_questions WHERE id = %s", (question_id,))
 
-    except Exception:
-        conn.rollback()
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to create question"
-        )
-
-    finally:
-        cursor.close()
-        conn.close()
-
-
-# ============================================================
-# Create Option (Admin only — org-scoped)
-# ============================================================
-
-@router.post("/questions/{question_id}/options", status_code=201)
-def create_option(
-    question_id: int,
-    option_data: OptionCreateRequest,
-    current_user: dict = Depends(require_admin)
-):
-    if option_data.option_label not in ("A", "B", "C", "D"):
-        raise HTTPException(
-            status_code=400,
-            detail="option_label must be A, B, C, or D"
-        )
-
-    org_id = current_user["organization_id"]
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    try:
-        cursor.execute(
-            """
-            SELECT qq.id
-            FROM quiz_questions qq
-            JOIN quizzes q ON q.id = qq.quiz_id
-            JOIN course_modules cm ON cm.id = q.module_id
-            JOIN courses c ON c.id = cm.course_id
-            WHERE qq.id = %s AND c.organization_id = %s
-            """,
-            (question_id, org_id)
-        )
-        if not cursor.fetchone():
-            raise HTTPException(
-                status_code=404,
-                detail="Question not found"
-            )
-
-        cursor.execute(
+    def insert_option(self, question_id: int, label: str, text: str, is_correct: bool) -> Dict[str, Any]:
+        self.cursor.execute(
             """
             INSERT INTO quiz_options (question_id, option_label, option_text, is_correct)
             VALUES (%s, %s, %s, %s)
             RETURNING id, question_id, option_label, option_text, is_correct
             """,
-            (
-                question_id,
-                option_data.option_label,
-                option_data.option_text.strip(),
-                option_data.is_correct
-            )
+            (question_id, label, text, is_correct)
         )
-        option = cursor.fetchone()
-        conn.commit()
+        return self._fetchone_dict()
 
-        return {
-            "message": "Option created successfully",
-            "option": {
-                "id": option[0],
-                "question_id": option[1],
-                "option_label": option[2],
-                "option_text": option[3],
-                "is_correct": option[4]
-            }
-        }
-
-    except HTTPException:
-        conn.rollback()
-        raise
-
-    except Exception:
-        conn.rollback()
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to create option"
-        )
-
-    finally:
-        cursor.close()
-        conn.close()
-
-
-# ============================================================
-# Update Quiz (Admin only — org-scoped)
-# ============================================================
-
-@router.put("/{quiz_id}")
-def update_quiz(
-    quiz_id: int,
-    quiz_data: QuizUpdateRequest,
-    current_user: dict = Depends(require_admin)
-):
-    org_id = current_user["organization_id"]
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    try:
-        cursor.execute(
-            """
-            SELECT q.id
-            FROM quizzes q
-            JOIN course_modules cm ON cm.id = q.module_id
-            JOIN courses c ON c.id = cm.course_id
-            WHERE q.id = %s AND c.organization_id = %s
-            """,
-            (quiz_id, org_id)
-        )
-        if not cursor.fetchone():
-            raise HTTPException(status_code=404, detail="Quiz not found")
-
-        fields = []
-        values = []
-
-        if quiz_data.title is not None:
-            fields.append("title = %s")
-            values.append(quiz_data.title.strip())
-        if quiz_data.description is not None:
-            fields.append("description = %s")
-            values.append(quiz_data.description.strip())
-        if quiz_data.passing_score is not None:
-            if not (0 <= quiz_data.passing_score <= 100):
-                raise HTTPException(
-                    status_code=400,
-                    detail="passing_score must be between 0 and 100"
-                )
-            fields.append("passing_score = %s")
-            values.append(quiz_data.passing_score)
-
-        if not fields:
-            raise HTTPException(
-                status_code=400,
-                detail="No fields provided to update"
-            )
-
-        fields.append("updated_at = CURRENT_TIMESTAMP")
-        values.append(quiz_id)
-
-        cursor.execute(
-            f"UPDATE quizzes SET {', '.join(fields)} WHERE id = %s "
-            f"RETURNING id, title, description, passing_score",
-            tuple(values)
-        )
-        updated = cursor.fetchone()
-
-        conn.commit()
-
-        return {
-            "message": "Quiz updated successfully",
-            "quiz": {
-                "id": updated[0],
-                "title": updated[1],
-                "description": updated[2],
-                "passing_score": updated[3]
-            }
-        }
-
-    except HTTPException:
-        conn.rollback()
-        raise
-
-    except Exception:
-        conn.rollback()
-        raise HTTPException(status_code=500, detail="Failed to update quiz")
-
-    finally:
-        cursor.close()
-        conn.close()
-
-
-# ============================================================
-# Delete Quiz (Admin only — org-scoped)
-# ============================================================
-
-@router.delete("/{quiz_id}")
-def delete_quiz(
-    quiz_id: int,
-    current_user: dict = Depends(require_admin)
-):
-    org_id = current_user["organization_id"]
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    try:
-        cursor.execute(
-            """
-            SELECT q.id
-            FROM quizzes q
-            JOIN course_modules cm ON cm.id = q.module_id
-            JOIN courses c ON c.id = cm.course_id
-            WHERE q.id = %s AND c.organization_id = %s
-            """,
-            (quiz_id, org_id)
-        )
-        if not cursor.fetchone():
-            raise HTTPException(status_code=404, detail="Quiz not found")
-
-        # Delete options → questions → quiz (cascade order)
-        cursor.execute(
-            """
-            DELETE FROM quiz_options
-            WHERE question_id IN (
-                SELECT id FROM quiz_questions WHERE quiz_id = %s
-            )
-            """,
-            (quiz_id,)
-        )
-        cursor.execute(
-            "DELETE FROM quiz_questions WHERE quiz_id = %s",
-            (quiz_id,)
-        )
-        cursor.execute(
-            "DELETE FROM quizzes WHERE id = %s",
-            (quiz_id,)
-        )
-
-        conn.commit()
-        return {"message": "Quiz deleted successfully"}
-
-    except HTTPException:
-        conn.rollback()
-        raise
-
-    except Exception:
-        conn.rollback()
-        raise HTTPException(status_code=500, detail="Failed to delete quiz")
-
-    finally:
-        cursor.close()
-        conn.close()
-
-
-# ============================================================
-# Update Question (Admin only — org-scoped)
-# ============================================================
-
-@router.put("/questions/{question_id}")
-def update_question(
-    question_id: int,
-    question_data: QuestionUpdateRequest,
-    current_user: dict = Depends(require_admin)
-):
-    org_id = current_user["organization_id"]
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    try:
-        cursor.execute(
-            """
-            SELECT qq.id
-            FROM quiz_questions qq
-            JOIN quizzes q ON q.id = qq.quiz_id
-            JOIN course_modules cm ON cm.id = q.module_id
-            JOIN courses c ON c.id = cm.course_id
-            WHERE qq.id = %s AND c.organization_id = %s
-            """,
-            (question_id, org_id)
-        )
-        if not cursor.fetchone():
-            raise HTTPException(status_code=404, detail="Question not found")
-
-        fields = []
-        values = []
-
-        if question_data.question_text is not None:
-            fields.append("question_text = %s")
-            values.append(question_data.question_text.strip())
-        if question_data.question_order is not None:
-            fields.append("question_order = %s")
-            values.append(question_data.question_order)
-
-        if not fields:
-            raise HTTPException(
-                status_code=400,
-                detail="No fields provided to update"
-            )
-
-        values.append(question_id)
-        cursor.execute(
-            f"UPDATE quiz_questions SET {', '.join(fields)} WHERE id = %s "
-            f"RETURNING id, question_text, question_order",
-            tuple(values)
-        )
-        updated = cursor.fetchone()
-
-        conn.commit()
-        return {
-            "message": "Question updated successfully",
-            "question": {
-                "id": updated[0],
-                "question_text": updated[1],
-                "question_order": updated[2]
-            }
-        }
-
-    except HTTPException:
-        conn.rollback()
-        raise
-
-    except Exception:
-        conn.rollback()
-        raise HTTPException(status_code=500, detail="Failed to update question")
-
-    finally:
-        cursor.close()
-        conn.close()
-
-
-# ============================================================
-# Delete Question (Admin only — org-scoped)
-# ============================================================
-
-@router.delete("/questions/{question_id}")
-def delete_question(
-    question_id: int,
-    current_user: dict = Depends(require_admin)
-):
-    org_id = current_user["organization_id"]
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    try:
-        cursor.execute(
-            """
-            SELECT qq.id
-            FROM quiz_questions qq
-            JOIN quizzes q ON q.id = qq.quiz_id
-            JOIN course_modules cm ON cm.id = q.module_id
-            JOIN courses c ON c.id = cm.course_id
-            WHERE qq.id = %s AND c.organization_id = %s
-            """,
-            (question_id, org_id)
-        )
-        if not cursor.fetchone():
-            raise HTTPException(status_code=404, detail="Question not found")
-
-        cursor.execute(
-            "DELETE FROM quiz_options WHERE question_id = %s",
-            (question_id,)
-        )
-        cursor.execute(
-            "DELETE FROM quiz_questions WHERE id = %s",
+    def reset_other_correct_options(self, question_id: int) -> None:
+        self.cursor.execute(
+            "UPDATE quiz_options SET is_correct = FALSE WHERE question_id = %s",
             (question_id,)
         )
 
-        conn.commit()
-        return {"message": "Question deleted successfully"}
+    def update_option_fields(self, option_id: int, question_id: int, fields: List[str], values: List[Any]) -> Dict[str, Any]:
+        query = f"UPDATE quiz_options SET {', '.join(fields)} WHERE id = %s AND question_id = %s RETURNING id, option_label, option_text, is_correct"
+        self.cursor.execute(query, tuple(values))
+        return self._fetchone_dict()
 
-    except HTTPException:
-        conn.rollback()
-        raise
-
-    except Exception:
-        conn.rollback()
-        raise HTTPException(status_code=500, detail="Failed to delete question")
-
-    finally:
-        cursor.close()
-        conn.close()
-
-
-# ============================================================
-# Update Option (Admin only — org-scoped)
-# ============================================================
-
-@router.put("/questions/{question_id}/options/{option_id}")
-def update_option(
-    question_id: int,
-    option_id: int,
-    option_data: OptionUpdateRequest,
-    current_user: dict = Depends(require_admin)
-):
-    org_id = current_user["organization_id"]
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    try:
-        # Verify option belongs to question and question belongs to admin's organization
-        cursor.execute(
-            """
-            SELECT qo.id
-            FROM quiz_options qo
-            JOIN quiz_questions qq ON qq.id = qo.question_id
-            JOIN quizzes q ON q.id = qq.quiz_id
-            JOIN course_modules cm ON cm.id = q.module_id
-            JOIN courses c ON c.id = cm.course_id
-            WHERE qo.id = %s AND qo.question_id = %s AND c.organization_id = %s
-            """,
-            (option_id, question_id, org_id)
-        )
-        if not cursor.fetchone():
-            raise HTTPException(
-                status_code=404,
-                detail="Option not found for this question"
-            )
-
-        fields = []
-        values = []
-
-        if option_data.option_text is not None:
-            fields.append("option_text = %s")
-            values.append(option_data.option_text.strip())
-
-        if option_data.is_correct is not None:
-            if option_data.is_correct:
-                # Unset all other options for this question first
-                cursor.execute(
-                    "UPDATE quiz_options SET is_correct = FALSE WHERE question_id = %s",
-                    (question_id,)
-                )
-            fields.append("is_correct = %s")
-            values.append(option_data.is_correct)
-
-        if not fields:
-            raise HTTPException(
-                status_code=400,
-                detail="No fields provided to update"
-            )
-
-        values.extend([option_id, question_id])
-        cursor.execute(
-            f"UPDATE quiz_options SET {', '.join(fields)} "
-            f"WHERE id = %s AND question_id = %s "
-            f"RETURNING id, option_label, option_text, is_correct",
-            tuple(values)
-        )
-        updated = cursor.fetchone()
-
-        conn.commit()
-        return {
-            "message": "Option updated successfully",
-            "option": {
-                "id": updated[0],
-                "option_label": updated[1],
-                "option_text": updated[2],
-                "is_correct": updated[3]
-            }
-        }
-
-    except HTTPException:
-        conn.rollback()
-        raise
-
-    except Exception:
-        conn.rollback()
-        raise HTTPException(status_code=500, detail="Failed to update option")
-
-    finally:
-        cursor.close()
-        conn.close()
-
-
-# ============================================================
-# Delete Option (Admin only — org-scoped)
-# ============================================================
-
-@router.delete("/questions/{question_id}/options/{option_id}")
-def delete_option(
-    question_id: int,
-    option_id: int,
-    current_user: dict = Depends(require_admin)
-):
-    org_id = current_user["organization_id"]
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    try:
-        cursor.execute(
-            """
-            SELECT qo.id
-            FROM quiz_options qo
-            JOIN quiz_questions qq ON qq.id = qo.question_id
-            JOIN quizzes q ON q.id = qq.quiz_id
-            JOIN course_modules cm ON cm.id = q.module_id
-            JOIN courses c ON c.id = cm.course_id
-            WHERE qo.id = %s AND qo.question_id = %s AND c.organization_id = %s
-            """,
-            (option_id, question_id, org_id)
-        )
-        if not cursor.fetchone():
-            raise HTTPException(status_code=404, detail="Option not found")
-
-        cursor.execute(
+    def delete_option_record(self, option_id: int, question_id: int) -> None:
+        self.cursor.execute(
             "DELETE FROM quiz_options WHERE id = %s AND question_id = %s",
             (option_id, question_id)
         )
 
-        conn.commit()
-        return {"message": "Option deleted successfully"}
-
-    except HTTPException:
-        conn.rollback()
-        raise
-
-    except Exception:
-        conn.rollback()
-        raise HTTPException(status_code=500, detail="Failed to delete option")
-
-    finally:
-        cursor.close()
-        conn.close()
-
-
-# ============================================================
-# Get Quiz (Student only — enrolled students, no correct answers)
-# ============================================================
-
-@router.get("/{quiz_id}")
-def get_quiz(
-    quiz_id: int,
-    current_user: dict = Depends(require_student)
-):
-    student_id = current_user["id"]
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    try:
-        # Get quiz and associated course
-        cursor.execute(
+    def get_quiz_header(self, quiz_id: int) -> Optional[Dict[str, Any]]:
+        self.cursor.execute(
             """
-            SELECT
-                q.id, q.title, q.description, q.passing_score,
-                cm.course_id
+            SELECT q.id, q.title, q.description, q.passing_score, cm.course_id
             FROM quizzes q
             JOIN course_modules cm ON cm.id = q.module_id
             WHERE q.id = %s
             """,
             (quiz_id,)
         )
-        quiz = cursor.fetchone()
+        return self._fetchone_dict()
 
-        if not quiz:
-            raise HTTPException(
-                status_code=404,
-                detail="Quiz not found"
-            )
-
-        course_id = quiz[4]
-
-        # Verify student is enrolled
-        cursor.execute(
+    def get_student_questions_and_options(self, quiz_id: int) -> List[Dict[str, Any]]:
+        self.cursor.execute(
             """
-            SELECT id FROM enrollments
-            WHERE student_id = %s AND course_id = %s
-            """,
-            (student_id, course_id)
-        )
-        if not cursor.fetchone():
-            raise HTTPException(
-                status_code=403,
-                detail="You are not enrolled in this course"
-            )
-
-        # Get questions + options WITHOUT is_correct
-        cursor.execute(
-            """
-            SELECT
-                qq.id, qq.question_text, qq.question_order,
-                qo.id, qo.option_label, qo.option_text
+            SELECT qq.id as q_id, qq.question_text, qq.question_order,
+                   qo.id as o_id, qo.option_label, qo.option_text
             FROM quiz_questions qq
             LEFT JOIN quiz_options qo ON qo.question_id = qq.id
             WHERE qq.quiz_id = %s
@@ -747,131 +195,22 @@ def get_quiz(
             """,
             (quiz_id,)
         )
-        rows = cursor.fetchall()
+        return self._fetchall_dict()
 
-        questions = {}
-        for row in rows:
-            qid = row[0]
-            if qid not in questions:
-                questions[qid] = {
-                    "id": qid,
-                    "question_text": row[1],
-                    "question_order": row[2],
-                    "options": []
-                }
-            if row[3] is not None:
-                questions[qid]["options"].append({
-                    "id": row[3],
-                    "option_label": row[4],
-                    "option_text": row[5]
-                    # is_correct intentionally omitted
-                })
-
-        return {
-            "quiz": {
-                "id": quiz[0],
-                "title": quiz[1],
-                "description": quiz[2],
-                "passing_score": quiz[3],
-                "questions": list(questions.values())
-            }
-        }
-
-    finally:
-        cursor.close()
-        conn.close()
-
-
-# ============================================================
-# Submit Quiz (Student only — own submission only)
-# ============================================================
-
-@router.post("/{quiz_id}/submit")
-def submit_quiz(
-    quiz_id: int,
-    submission: SubmitQuizRequest,
-    current_user: dict = Depends(require_student)
-):
-    student_id = current_user["id"]
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    try:
-        # Get quiz details and course
-        cursor.execute(
+    def get_quiz_eval_blueprint(self, quiz_id: int) -> List[Dict[str, Any]]:
+        self.cursor.execute(
             """
-            SELECT q.id, q.passing_score, cm.course_id
-            FROM quizzes q
-            JOIN course_modules cm ON cm.id = q.module_id
-            WHERE q.id = %s
-            """,
-            (quiz_id,)
-        )
-        quiz = cursor.fetchone()
-
-        if not quiz:
-            raise HTTPException(
-                status_code=404,
-                detail="Quiz not found"
-            )
-
-        passing_score = quiz[1]
-        course_id = quiz[2]
-
-        # Verify student is enrolled
-        cursor.execute(
-            """
-            SELECT id FROM enrollments
-            WHERE student_id = %s AND course_id = %s
-            """,
-            (student_id, course_id)
-        )
-        if not cursor.fetchone():
-            raise HTTPException(
-                status_code=403,
-                detail="You are not enrolled in this course"
-            )
-
-        # Validate that all questions are answered
-        cursor.execute(
-            """
-            SELECT COUNT(*) FROM quiz_questions WHERE quiz_id = %s
-            """,
-            (quiz_id,)
-        )
-        total_questions = cursor.fetchone()[0]
-
-        if total_questions == 0:
-            raise HTTPException(
-                status_code=400,
-                detail="Quiz has no questions"
-            )
-
-        # Get correct answers (server-side only — never sent to client)
-        cursor.execute(
-            """
-            SELECT qq.id, qo.option_label
+            SELECT qq.id as q_id, qo.option_label, qo.is_correct
             FROM quiz_questions qq
-            JOIN quiz_options qo ON qo.question_id = qq.id
-            WHERE qq.quiz_id = %s AND qo.is_correct = TRUE
+            LEFT JOIN quiz_options qo ON qo.question_id = qq.id
+            WHERE qq.quiz_id = %s
             """,
             (quiz_id,)
         )
-        correct_answers = cursor.fetchall()
+        return self._fetchall_dict()
 
-        # Calculate score
-        correct_count = 0
-        for question_id, correct_option in correct_answers:
-            student_answer = submission.answers.get(str(question_id))
-            if student_answer == correct_option:
-                correct_count += 1
-
-        score = round((correct_count / total_questions) * 100) if total_questions > 0 else 0
-        passed = score >= passing_score
-
-        # Save quiz attempt
-        cursor.execute(
+    def insert_attempt(self, quiz_id: int, student_id: int, score: int, passed: bool) -> Dict[str, Any]:
+        self.cursor.execute(
             """
             INSERT INTO quiz_attempts (quiz_id, student_id, score, passed)
             VALUES (%s, %s, %s, %s)
@@ -879,49 +218,397 @@ def submit_quiz(
             """,
             (quiz_id, student_id, score, passed)
         )
-        attempt = cursor.fetchone()
-        conn.commit()
+        return self._fetchone_dict()
 
-        # In-app notification for quiz result
-        from app.services.notification_service import NotificationService
-        try:
-            NotificationService.create(
-                conn,
-                user_id=student_id,
-                organization_id=current_user.get("organization_id"),
-                type=NotificationService.QUIZ_PASSED if passed else NotificationService.QUIZ_FAILED,
-                title=f"Quiz {'Passed' if passed else 'Failed'} ({score}%)",
-                message=f"You scored {score}% on the module quiz (Passing: {passing_score}%).",
-                link=None,
-            )
-        except Exception:
-            pass
 
-        return {
-            "message": "Quiz submitted successfully",
-            "result": {
-                "attempt_id": attempt[0],
-                "quiz_id": quiz_id,
-                "total_questions": total_questions,
-                "correct_answers": correct_count,
-                "score": score,
-                "passing_score": passing_score,
-                "passed": passed,
-                "attempted_at": attempt[1]
-            }
+# ============================================================================
+# TIER 2: BUSINESS LOGIC & DOMAIN SERVICE LAYER
+# ============================================================================
+
+class QuizService:
+    """Contains business rules, grade computation, and boundary validations."""
+
+    def __init__(self, repo: QuizRepository):
+        self.repo = repo
+
+    def create_quiz(self, data: QuizCreateRequest, org_id: int) -> Dict[str, Any]:
+        if not (0 <= data.passing_score <= 100):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Passing score must be between 0 and 100.")
+        
+        if not self.repo.verify_module_in_org(data.module_id, org_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module not found in this organization.")
+
+        return self.repo.insert_quiz(
+            module_id=data.module_id,
+            title=data.title.strip(),
+            description=data.description.strip() if data.description else "",
+            passing_score=data.passing_score
+        )
+
+    def update_quiz(self, quiz_id: int, data: QuizUpdateRequest, org_id: int) -> Dict[str, Any]:
+        if not self.repo.verify_quiz_in_org(quiz_id, org_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz not found.")
+
+        fields, values = [], []
+        if data.title is not None:
+            fields.append("title = %s")
+            values.append(data.title.strip())
+        if data.description is not None:
+            fields.append("description = %s")
+            values.append(data.description.strip())
+        if data.passing_score is not None:
+            if not (0 <= data.passing_score <= 100):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Passing score must be between 0 and 100.")
+            fields.append("passing_score = %s")
+            values.append(data.passing_score)
+
+        if not fields:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid fields provided to update.")
+
+        fields.append("updated_at = CURRENT_TIMESTAMP")
+        values.append(quiz_id)
+        return self.repo.update_quiz_fields(quiz_id, fields, values)
+
+    def delete_quiz(self, quiz_id: int, org_id: int) -> None:
+        if not self.repo.verify_quiz_in_org(quiz_id, org_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz not found.")
+        self.repo.cascade_delete_quiz(quiz_id)
+
+    def create_question(self, quiz_id: int, data: QuestionCreateRequest, org_id: int) -> Dict[str, Any]:
+        if not self.repo.verify_quiz_in_org(quiz_id, org_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz not found.")
+        
+        return self.repo.insert_question(
+            quiz_id=quiz_id,
+            text=data.question_text.strip(),
+            order=data.question_order
+        )
+
+    def update_question(self, question_id: int, data: QuestionUpdateRequest, org_id: int) -> Dict[str, Any]:
+        if not self.repo.verify_question_in_org(question_id, org_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found.")
+
+        fields, values = [], []
+        if data.question_text is not None:
+            fields.append("question_text = %s")
+            values.append(data.question_text.strip())
+        if data.question_order is not None:
+            fields.append("question_order = %s")
+            values.append(data.question_order)
+
+        if not fields:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid fields provided to update.")
+
+        values.append(question_id)
+        return self.repo.update_question_fields(question_id, fields, values)
+
+    def delete_question(self, question_id: int, org_id: int) -> None:
+        if not self.repo.verify_question_in_org(question_id, org_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found.")
+        self.repo.delete_question_record(question_id)
+
+    def create_option(self, question_id: int, data: OptionCreateRequest, org_id: int) -> Dict[str, Any]:
+        if data.option_label not in {"A", "B", "C", "D"}:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Option label must be A, B, C, or D.")
+
+        if not self.repo.verify_question_in_org(question_id, org_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found.")
+
+        return self.repo.insert_option(
+            question_id=question_id,
+            label=data.option_label,
+            text=data.option_text.strip(),
+            is_correct=data.is_correct
+        )
+
+    def update_option(self, question_id: int, option_id: int, data: OptionUpdateRequest, org_id: int) -> Dict[str, Any]:
+        if not self.repo.verify_option_in_org(option_id, question_id, org_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Option not found for this question.")
+
+        fields, values = [], []
+        if data.option_text is not None:
+            fields.append("option_text = %s")
+            values.append(data.option_text.strip())
+
+        if data.is_correct is not None:
+            if data.is_correct:
+                self.repo.reset_other_correct_options(question_id)
+            fields.append("is_correct = %s")
+            values.append(data.is_correct)
+
+        if not fields:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid fields provided to update.")
+
+        values.extend([option_id, question_id])
+        return self.repo.update_option_fields(option_id, question_id, fields, values)
+
+    def delete_option(self, question_id: int, option_id: int, org_id: int) -> None:
+        if not self.repo.verify_option_in_org(option_id, question_id, org_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Option not found.")
+        self.repo.delete_option_record(option_id, question_id)
+
+    def get_quiz_for_student(self, quiz_id: int, student_id: int) -> Dict[str, Any]:
+        quiz = self.repo.get_quiz_header(quiz_id)
+        if not quiz:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz not found.")
+
+        if not self.repo.is_student_enrolled(student_id, quiz["course_id"]):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not enrolled in this course.")
+
+        rows = self.repo.get_student_questions_and_options(quiz_id)
+        questions_map = {}
+        for row in rows:
+            qid = row["q_id"]
+            if qid not in questions_map:
+                questions_map[qid] = {
+                    "id": qid,
+                    "question_text": row["question_text"],
+                    "question_order": row["question_order"],
+                    "options": []
+                }
+            if row["o_id"]:
+                questions_map[qid]["options"].append({
+                    "id": row["o_id"],
+                    "option_label": row["option_label"],
+                    "option_text": row["option_text"]
+                })
+
+        quiz["questions"] = list(questions_map.values())
+        return quiz
+
+    def grade_submission(self, quiz_id: int, submission: SubmitQuizRequest, student_id: int) -> Tuple[Dict[str, Any], bool, int, int]:
+        quiz = self.repo.get_quiz_header(quiz_id)
+        if not quiz:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz not found.")
+
+        if not self.repo.is_student_enrolled(student_id, quiz["course_id"]):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not enrolled in this course.")
+
+        blueprint = self.repo.get_quiz_eval_blueprint(quiz_id)
+        if not blueprint:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quiz has no questions configured.")
+
+        quiz_key = {}
+        for r in blueprint:
+            qid = r["q_id"]
+            if qid not in quiz_key:
+                quiz_key[qid] = {"valid_labels": set(), "correct_label": None}
+            if r["option_label"]:
+                quiz_key[qid]["valid_labels"].add(r["option_label"])
+                if r["is_correct"]:
+                    quiz_key[qid]["correct_label"] = r["option_label"]
+
+        correct_count = 0
+        total_questions = len(quiz_key)
+
+        for str_qid, selected_option in submission.answers.items():
+            if not str_qid.isdigit():
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid question ID format: {str_qid}")
+            qid = int(str_qid)
+            if qid not in quiz_key:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Question ID {qid} does not belong to this quiz.")
+
+            if selected_option and selected_option not in quiz_key[qid]["valid_labels"]:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid option '{selected_option}' for question {qid}.")
+
+            if selected_option == quiz_key[qid]["correct_label"]:
+                correct_count += 1
+
+        score = round((correct_count / total_questions) * 100) if total_questions > 0 else 0
+        passed = score >= quiz["passing_score"]
+
+        attempt = self.repo.insert_attempt(quiz_id, student_id, score, passed)
+
+        result_payload = {
+            "attempt_id": attempt["id"],
+            "quiz_id": quiz_id,
+            "total_questions": total_questions,
+            "correct_answers": correct_count,
+            "score": score,
+            "passing_score": quiz["passing_score"],
+            "passed": passed,
+            "attempted_at": attempt["attempted_at"]
         }
+        return result_payload, passed, score, quiz["passing_score"]
 
+
+# ============================================================================
+# TIER 3: DEPENDENCY INJECTION & ASYNC TASK DISPATCHER
+# ============================================================================
+
+def get_quiz_service():
+    """Manages transactional boundaries and injects the service layer."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        repo = QuizRepository(cursor)
+        yield QuizService(repo)
+        conn.commit()
     except HTTPException:
         conn.rollback()
         raise
-
-    except Exception:
+    except Exception as e:
         conn.rollback()
+        logger.error(f"Transaction failed: {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=500,
-            detail="Failed to submit quiz"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal server error occurred."
         )
-
     finally:
         cursor.close()
         conn.close()
+
+
+def dispatch_quiz_notification(user_id: int, org_id: int, score: int, passing_score: int, passed: bool):
+    """Executes notifications out-of-band to prevent blocking the response thread."""
+    conn = get_connection()
+    try:
+        NotificationService.create(
+            conn,
+            user_id=user_id,
+            organization_id=org_id,
+            type=NotificationService.QUIZ_PASSED if passed else NotificationService.QUIZ_FAILED,
+            title=f"Quiz {'Passed' if passed else 'Failed'} ({score}%)",
+            message=f"You scored {score}% on the module quiz (Passing: {passing_score}%).",
+            link=None,
+        )
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.warning(f"Background notification dispatch failed for user {user_id}: {str(e)}")
+    finally:
+        conn.close()
+
+
+# ============================================================================
+# HTTP CONTROLLER ROUTE DEFINITIONS
+# ============================================================================
+
+@router.post("/", status_code=status.HTTP_201_CREATED)
+def create_quiz(
+    data: QuizCreateRequest,
+    current_user: dict = Depends(require_admin),
+    service: QuizService = Depends(get_quiz_service)
+) -> Dict[str, Any]:
+    quiz = service.create_quiz(data, current_user["organization_id"])
+    return {"message": "Quiz created successfully", "quiz": quiz}
+
+
+@router.put("/{quiz_id}")
+def update_quiz(
+    quiz_id: int,
+    data: QuizUpdateRequest,
+    current_user: dict = Depends(require_admin),
+    service: QuizService = Depends(get_quiz_service)
+) -> Dict[str, Any]:
+    quiz = service.update_quiz(quiz_id, data, current_user["organization_id"])
+    return {"message": "Quiz updated successfully", "quiz": quiz}
+
+
+@router.delete("/{quiz_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_quiz(
+    quiz_id: int,
+    current_user: dict = Depends(require_admin),
+    service: QuizService = Depends(get_quiz_service)
+):
+    service.delete_quiz(quiz_id, current_user["organization_id"])
+
+
+@router.post("/{quiz_id}/questions", status_code=status.HTTP_201_CREATED)
+def create_question(
+    quiz_id: int,
+    data: QuestionCreateRequest,
+    current_user: dict = Depends(require_admin),
+    service: QuizService = Depends(get_quiz_service)
+) -> Dict[str, Any]:
+    question = service.create_question(quiz_id, data, current_user["organization_id"])
+    return {"message": "Question created successfully", "question": question}
+
+
+@router.put("/questions/{question_id}")
+def update_question(
+    question_id: int,
+    data: QuestionUpdateRequest,
+    current_user: dict = Depends(require_admin),
+    service: QuizService = Depends(get_quiz_service)
+) -> Dict[str, Any]:
+    question = service.update_question(question_id, data, current_user["organization_id"])
+    return {"message": "Question updated successfully", "question": question}
+
+
+@router.delete("/questions/{question_id}")
+def delete_question(
+    question_id: int,
+    current_user: dict = Depends(require_admin),
+    service: QuizService = Depends(get_quiz_service)
+) -> Dict[str, str]:
+    service.delete_question(question_id, current_user["organization_id"])
+    return {"message": "Question deleted successfully"}
+
+
+@router.post("/questions/{question_id}/options", status_code=status.HTTP_201_CREATED)
+def create_option(
+    question_id: int,
+    data: OptionCreateRequest,
+    current_user: dict = Depends(require_admin),
+    service: QuizService = Depends(get_quiz_service)
+) -> Dict[str, Any]:
+    option = service.create_option(question_id, data, current_user["organization_id"])
+    return {"message": "Option created successfully", "option": option}
+
+
+@router.put("/questions/{question_id}/options/{option_id}")
+def update_option(
+    question_id: int,
+    option_id: int,
+    data: OptionUpdateRequest,
+    current_user: dict = Depends(require_admin),
+    service: QuizService = Depends(get_quiz_service)
+) -> Dict[str, Any]:
+    option = service.update_option(question_id, option_id, data, current_user["organization_id"])
+    return {"message": "Option updated successfully", "option": option}
+
+
+@router.delete("/questions/{question_id}/options/{option_id}")
+def delete_option(
+    question_id: int,
+    option_id: int,
+    current_user: dict = Depends(require_admin),
+    service: QuizService = Depends(get_quiz_service)
+) -> Dict[str, str]:
+    service.delete_option(question_id, option_id, current_user["organization_id"])
+    return {"message": "Option deleted successfully"}
+
+
+@router.get("/{quiz_id}")
+def get_quiz_for_student(
+    quiz_id: int,
+    current_user: dict = Depends(require_student),
+    service: QuizService = Depends(get_quiz_service)
+) -> Dict[str, Any]:
+    quiz = service.get_quiz_for_student(quiz_id, current_user["id"])
+    return {"quiz": quiz}
+
+
+@router.post("/{quiz_id}/submit")
+def submit_quiz(
+    quiz_id: int,
+    submission: SubmitQuizRequest,
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(require_student),
+    service: QuizService = Depends(get_quiz_service)
+) -> Dict[str, Any]:
+    result, passed, score, passing_score = service.grade_submission(
+        quiz_id, submission, current_user["id"]
+    )
+
+    background_tasks.add_task(
+        dispatch_quiz_notification,
+        user_id=current_user["id"],
+        org_id=current_user.get("organization_id"),
+        score=score,
+        passing_score=passing_score,
+        passed=passed
+    )
+
+    return {"message": "Quiz submitted successfully", "result": result}

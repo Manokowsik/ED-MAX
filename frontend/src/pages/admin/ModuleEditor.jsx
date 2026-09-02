@@ -16,7 +16,7 @@ import ContentEditor, { parseEmbedUrl } from '../../components/ContentEditor';
 import QuizBuilder from '../../components/QuizBuilder';
 
 // ============================================================
-// Preview Slide Renderer for Instructor Module Preview
+// Preview Slide Renderer for Admin Module Preview
 // ============================================================
 function ModulePreviewSlide({ contentItem }) {
   if (!contentItem) return null;
@@ -65,7 +65,7 @@ function ModulePreviewSlide({ contentItem }) {
 }
 
 // ============================================================
-// Main Instructor Module Editor Page
+// Main Admin Module Editor Page
 // ============================================================
 export default function ModuleEditor() {
   const { courseId, moduleId } = useParams();

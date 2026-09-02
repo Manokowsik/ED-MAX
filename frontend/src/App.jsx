@@ -20,7 +20,7 @@ import AdminStudentDetail from './pages/admin/StudentDetail';
 import AdminCourses from './pages/admin/Courses';
 import AdminCourseDetail from './pages/admin/CourseDetail';
 import AdminAssignments from './pages/admin/Assignments';
-import ModuleEditor from './pages/instructor/ModuleEditor';
+import ModuleEditor from './pages/admin/ModuleEditor';
 
 // Student
 import StudentDashboard from './pages/student/Dashboard';
@@ -147,7 +147,7 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <RoleRoute roles={['ADMIN']}>
-              <Navigate to="/admin/courses?tab=assign" replace />
+              <AdminAssignments />
             </RoleRoute>
           </ProtectedRoute>
         }

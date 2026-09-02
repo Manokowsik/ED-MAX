@@ -20,7 +20,7 @@ export default function HeaderNav() {
 
   const navItems = isAdmin
     ? [
-        { to: '/admin/dashboard', label: 'Instructor Dashboard', icon: '📊' },
+        { to: '/admin/dashboard', label: 'Admin Dashboard', icon: '📊' },
         { to: '/admin/courses', label: 'Course Catalog', icon: '📖' },
         { to: '/admin/students', label: 'Learners', icon: '👥' },
         { to: '/admin/assignments', label: 'Assignments', icon: '📋' },
@@ -91,8 +91,8 @@ export default function HeaderNav() {
               <div className="header-profile-avatar">{initials}</div>
               <div className="header-profile-info">
                 <div className="header-profile-name">{user?.name ?? 'User'}</div>
-                <div className={`header-role-badge ${isAdmin ? 'instructor' : 'student'}`}>
-                  {isAdmin ? 'Instructor' : 'Student'}
+                <div className={`header-role-badge ${isAdmin ? 'admin instructor' : 'student'}`}>
+                  {isAdmin ? 'Admin' : 'Student'}
                 </div>
               </div>
               <span className="header-profile-arrow">▾</span>
@@ -123,7 +123,7 @@ export default function HeaderNav() {
                   className="dropdown-item logout"
                   onClick={handleLogout}
                   id="dropdown-logout-btn"
-                  style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '8px 12px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', borderRadius: '4px', fontSize: '0.85rem', color: 'var(--danger)' }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '10px 12px', background: 'var(--danger-light, #fee2e2)', border: '1px solid rgba(220, 38, 38, 0.2)', cursor: 'pointer', textAlign: 'left', borderRadius: '6px', fontSize: '0.85rem', fontWeight: 700, color: 'var(--danger, #dc2626)', marginTop: '4px' }}
                 >
                   🚪 Sign out
                 </button>

@@ -208,7 +208,7 @@ export default function AccountSettings() {
                 <div style={{ background: 'var(--gray-50)', padding: '0.85rem 1rem', borderRadius: '8px', border: '1px solid var(--gray-200)' }}>
                   <span style={{ fontSize: '0.75rem', color: 'var(--gray-500)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Account Role</span>
                   <div style={{ fontWeight: 600, color: 'var(--gray-800)', marginTop: '0.2rem' }}>
-                    {profile?.role === 'ADMIN' ? 'Instructor / Administrator' : 'Learner / Student'}
+                    {profile?.role === 'ADMIN' ? 'Administrator' : 'Learner / Student'}
                   </div>
                 </div>
 

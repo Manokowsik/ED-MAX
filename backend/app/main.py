@@ -12,6 +12,8 @@ from app.routers.certificates import router as certificates_router
 from app.routers.users import router as users_router
 
 
+from app.core.config import CORS_ORIGINS
+
 app = FastAPI(
     title="ED-MAX Training Platform API",
     description="Backend API for the ED-MAX Training Platform",
@@ -25,11 +27,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -36,6 +36,10 @@ EMAIL_MODE = _get_env("EMAIL_MODE", "development")
 DEV_LOG_AUTH_TOKENS = (_get_env("DEV_LOG_AUTH_TOKENS", "true") or "true").lower() in ("true", "1", "yes")
 FRONTEND_URL = _get_env("FRONTEND_URL", "http://localhost:5173")
 
+# Dynamic CORS Configuration
+CORS_ORIGINS_RAW = _get_env("CORS_ORIGINS", "http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173")
+CORS_ORIGINS = [origin.strip() for origin in CORS_ORIGINS_RAW.split(",") if origin.strip()]
+
 
 # Token & OTP Expiration Parameters
 OTP_EXPIRE_MINUTES = int(_get_env("OTP_EXPIRE_MINUTES", "10"))

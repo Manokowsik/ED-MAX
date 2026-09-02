@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { verifyCertificate } from '../services/api';
 
 // ============================================================
@@ -19,10 +19,19 @@ function formatDate(iso) {
 // ============================================================
 export default function CertificateVerify() {
   const { certNumber } = useParams();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [cert, setCert] = useState(null);
   const [notFound, setNotFound] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  function handleBack() {
+    if (window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+    navigate('/student/certificates');
+  }
 
   function handleShare() {
     const url = window.location.href;
@@ -60,7 +69,9 @@ export default function CertificateVerify() {
       {/* Top bar */}
       <div style={styles.topBar}>
         <div style={styles.logo}>ED-MAX</div>
-        <Link to="/login" style={styles.loginLink}>Sign in →</Link>
+        <button type="button" onClick={handleBack} style={styles.backLink}>
+          ← Back
+        </button>
       </div>
 
       {/* Body */}
@@ -212,11 +223,17 @@ const styles = {
     color: 'var(--primary)',
     letterSpacing: '0.05em',
   },
-  loginLink: {
+  backLink: {
+    border: '1px solid rgba(79, 70, 229, 0.15)',
+    background: '#fff',
     color: 'var(--primary)',
     textDecoration: 'none',
     fontSize: 'var(--font-size-sm)',
-    fontWeight: 600,
+    fontWeight: 700,
+    borderRadius: 999,
+    padding: '0.5rem 0.9rem',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
   },
   body: {
     width: '100%',

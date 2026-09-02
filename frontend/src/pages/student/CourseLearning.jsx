@@ -1,25 +1,71 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import StudentLayout from '../../layouts/StudentLayout';
 import { useAuth } from '../../context/AuthContext';
-import { getStudentCourse, completeModule, submitQuiz, generateCertificate } from '../../services/api';
-import { LoadingPage, Alert, Badge, ProgressBar, Spinner, EmptyState } from '../../components/ui';
+import {
+  getStudentCourse,
+  completeModule,
+  submitQuiz,
+  generateCertificate,
+} from '../../services/api';
+import {
+  LoadingPage,
+  Alert,
+  Badge,
+  Spinner,
+  EmptyState,
+} from '../../components/ui';
 import { parseEmbedUrl } from '../../components/ContentEditor';
+import CourseHeader from '../../components/lms/CourseHeader';
+import CourseSidebar from '../../components/lms/CourseSidebar';
 
-// ============================================================
-// Video & Embed Render Helper
-// ============================================================
-function ContentSlideView({ contentItem }) {
+// ============================================================================
+// CONSTANTS & CONFIGURATION
+// ============================================================================
+
+const CONTENT_TYPES = Object.freeze({
+  TEXT: 'TEXT',
+  VIDEO: 'VIDEO',
+  EMBED: 'EMBED',
+});
+
+const VIEW_MODES = Object.freeze({
+  SLIDES: 'slides',
+  QUIZ: 'quiz',
+});
+
+const MODULE_STATES = Object.freeze({
+  COMPLETED: 'COMPLETED',
+  LOCKED: 'LOCKED',
+  AVAILABLE: 'AVAILABLE',
+});
+
+const MESSAGES = Object.freeze({
+  LOAD_FAILED: 'Failed to load course details. Please try again.',
+  NOT_ENROLLED: 'You are not enrolled in this course.',
+  QUIZ_SUBMIT_FAILED: 'Failed to submit quiz.',
+  MODULE_COMPLETE_FAILED: 'Failed to complete module.',
+  CERTIFICATE_FAILED: 'Failed to generate certificate.',
+  QUIZ_INCOMPLETE: (total) => `Please answer all ${total} questions before submitting.`,
+  QUIZ_PREREQ: 'You must pass the module quiz before marking this module as complete.',
+});
+
+// ============================================================================
+// SUB-COMPONENT: Content Slide Renderer
+// ============================================================================
+
+const ContentSlideView = React.memo(function ContentSlideView({ contentItem }) {
   if (!contentItem) return null;
 
   const type = contentItem.content_type;
   const rawContent = contentItem.content || '';
 
-  if (type === 'TEXT') {
+  if (type === CONTENT_TYPES.TEXT) {
+    const paragraphs = rawContent.split('\n\n').filter(Boolean);
     return (
-      <div style={styles.textContent}>
-        {rawContent.split('\n\n').map((paragraph, idx) => (
-          <p key={idx} style={{ marginBottom: 'var(--space-4)' }}>
+      <div style={STYLES.textContent}>
+        {paragraphs.map((paragraph, idx) => (
+          <p key={idx} style={STYLES.textParagraph}>
             {paragraph}
           </p>
         ))}
@@ -27,16 +73,15 @@ function ContentSlideView({ contentItem }) {
     );
   }
 
-  // VIDEO or EMBED
   const parsed = parseEmbedUrl(rawContent);
 
   if (parsed.type === 'youtube' || parsed.type === 'vimeo') {
     return (
-      <div style={styles.videoEmbedWrapper}>
+      <div style={STYLES.videoEmbedWrapper}>
         <iframe
           title="Module Video Content"
           src={parsed.embedUrl}
-          style={styles.iframe}
+          style={STYLES.iframe}
           allowFullScreen
         />
       </div>
@@ -45,20 +90,21 @@ function ContentSlideView({ contentItem }) {
 
   if (parsed.type === 'direct_video') {
     return (
-      <video controls src={parsed.embedUrl} style={{ width: '100%', maxHeight: 420, borderRadius: 'var(--radius-lg)' }}>
+      <video
+        controls
+        src={parsed.embedUrl}
+        style={STYLES.directVideoPlayer}
+      >
         Your browser does not support this video player.
       </video>
     );
   }
 
-  // External / Non-embeddable link
   return (
-    <div style={{ background: 'var(--info-light)', border: '1px solid #bae6fd', borderRadius: 'var(--radius-lg)', padding: 'var(--space-6)', textAlign: 'center' }}>
-      <div style={{ fontSize: '2.5rem', marginBottom: 'var(--space-2)' }}>🔗</div>
-      <h4 style={{ fontSize: 'var(--font-size-base)', fontWeight: 700, color: '#075985', marginBottom: 'var(--space-2)' }}>
-        External Resource
-      </h4>
-      <p style={{ fontSize: 'var(--font-size-sm)', color: '#0369a1', marginBottom: 'var(--space-4)' }}>
+    <div style={STYLES.externalResourceCard}>
+      <div style={STYLES.externalResourceIcon} aria-hidden="true">🔗</div>
+      <h4 style={STYLES.externalResourceTitle}>External Resource</h4>
+      <p style={STYLES.externalResourceSubtitle}>
         This content is hosted externally. Click below to open the resource in a new browser tab.
       </p>
       {parsed.embedUrl ? (
@@ -75,102 +121,119 @@ function ContentSlideView({ contentItem }) {
       )}
     </div>
   );
-}
+});
 
-// ============================================================
-// Student Quiz Player & Result Screen
-// ============================================================
-function StudentQuizPlayer({ quiz, onQuizPassed }) {
+// ============================================================================
+// SUB-COMPONENT: Student Quiz Player
+// ============================================================================
+
+const StudentQuizPlayer = React.memo(function StudentQuizPlayer({
+  quiz,
+  onQuizPassed,
+}) {
   const [currentQIndex, setCurrentQIndex] = useState(0);
-  const [answers, setAnswers] = useState({}); // { question_id: option_label }
+  const [answers, setAnswers] = useState({}); // { [questionId]: optionLabel }
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState(quiz.last_attempt ?? null);
+  const [result, setResult] = useState(quiz?.last_attempt ?? null);
   const [error, setError] = useState('');
-  const [submitted, setSubmitted] = useState(!!quiz.last_attempt);
+  const [submitted, setSubmitted] = useState(Boolean(quiz?.last_attempt));
 
-  const questions = quiz.questions ?? [];
+  const questions = useMemo(() => quiz?.questions ?? [], [quiz?.questions]);
   const currentQuestion = questions[currentQIndex];
 
-  function handleSelectOption(questionId, optionLabel) {
-    if (submitted && result?.passed) return;
-    setAnswers((a) => ({ ...a, [String(questionId)]: optionLabel }));
-  }
+  // Sync state if quiz prop changes
+  useEffect(() => {
+    if (quiz?.last_attempt) {
+      setResult(quiz.last_attempt);
+      setSubmitted(true);
+    }
+  }, [quiz?.last_attempt]);
 
-  async function handleSubmitQuiz(e) {
+  const handleSelectOption = useCallback((questionId, optionLabel) => {
+    if (submitted && result?.passed) return;
+    setAnswers((prev) => ({ ...prev, [String(questionId)]: optionLabel }));
+  }, [submitted, result?.passed]);
+
+  const handleSubmitQuiz = useCallback(async (e) => {
     e.preventDefault();
     setError('');
 
-    // Check all questions answered
     const unanswered = questions.filter((q) => !answers[String(q.id)]);
     if (unanswered.length > 0) {
-      setError(`Please answer all ${questions.length} questions before submitting.`);
+      setError(MESSAGES.QUIZ_INCOMPLETE(questions.length));
       return;
     }
 
     setSubmitting(true);
     try {
       const res = await submitQuiz(quiz.id, answers);
-      setResult(res.result);
-      setSubmitted(true);
-      if (res.result.passed && onQuizPassed) {
-        onQuizPassed(res.result);
+      const attemptResult = res?.result;
+      if (attemptResult) {
+        setResult(attemptResult);
+        setSubmitted(true);
+        if (attemptResult.passed && onQuizPassed) {
+          onQuizPassed(attemptResult);
+        }
       }
     } catch (err) {
-      setError(err.message || 'Failed to submit quiz.');
+      setError(err.message || MESSAGES.QUIZ_SUBMIT_FAILED);
     } finally {
       setSubmitting(false);
     }
-  }
+  }, [questions, answers, quiz?.id, onQuizPassed]);
 
-  function handleRetryQuiz() {
+  const handleRetryQuiz = useCallback(() => {
     setAnswers({});
     setSubmitted(false);
     setResult(null);
     setCurrentQIndex(0);
     setError('');
-  }
+  }, []);
 
   if (questions.length === 0) {
     return (
-      <div className="alert alert-info" style={{ marginTop: 'var(--space-4)' }}>
+      <div className="alert alert-info" style={STYLES.emptyQuizBox}>
         This quiz has no questions available.
       </div>
     );
   }
 
-  // QUIZ RESULT VIEW
+  // QUIZ RESULT SCREEN
   if (submitted && result) {
     return (
-      <div style={{ ...styles.card, marginTop: 'var(--space-6)' }}>
+      <div style={{ ...STYLES.card, marginTop: 'var(--space-6)' }}>
         <div
           style={{
+            ...STYLES.resultBanner,
             background: result.passed ? 'var(--success-light)' : 'var(--danger-light)',
-            border: `1px solid ${result.passed ? '#a7f3d0' : '#fecaca'}`,
-            borderRadius: 'var(--radius-lg)',
-            padding: 'var(--space-6)',
-            textAlign: 'center',
+            borderColor: result.passed ? '#a7f3d0' : '#fecaca',
           }}
         >
-          <div style={{ fontSize: '3.5rem' }}>{result.passed ? '🎉' : '❌'}</div>
+          <div style={STYLES.resultEmoji} aria-hidden="true">
+            {result.passed ? '🎉' : '❌'}
+          </div>
           <h3
             style={{
-              fontSize: 'var(--font-size-2xl)',
-              fontWeight: 700,
+              ...STYLES.resultHeading,
               color: result.passed ? 'var(--success-text)' : 'var(--danger-text)',
-              margin: 'var(--space-2) 0',
             }}
           >
             {result.passed ? 'Quiz Passed!' : 'Quiz Failed'}
           </h3>
 
-          <p style={{ fontSize: 'var(--font-size-base)', color: result.passed ? 'var(--success-text)' : 'var(--danger-text)' }}>
+          <p
+            style={{
+              ...STYLES.resultScoreText,
+              color: result.passed ? 'var(--success-text)' : 'var(--danger-text)',
+            }}
+          >
             Your Score: <strong>{result.score}%</strong> ({result.correct_answers} of {result.total_questions} correct).
             Passing requirement: <strong>{result.passing_score}%</strong>.
           </p>
 
           {!result.passed && (
-            <div style={{ marginTop: 'var(--space-4)' }}>
-              <p className="text-sm mb-3" style={{ color: 'var(--danger-text)' }}>
+            <div style={STYLES.retryContainer}>
+              <p className="text-sm mb-3" style={STYLES.retrySubText}>
                 You need at least {result.passing_score}% score to complete this module. Try again!
               </p>
               <button
@@ -185,7 +248,7 @@ function StudentQuizPlayer({ quiz, onQuizPassed }) {
           )}
 
           {result.passed && (
-            <p className="text-sm font-semibold" style={{ marginTop: 'var(--space-4)', color: 'var(--success-text)' }}>
+            <p className="text-sm font-semibold" style={STYLES.passedNotice}>
               ✓ Quiz passed! You can now mark this module as complete below.
             </p>
           )}
@@ -194,12 +257,12 @@ function StudentQuizPlayer({ quiz, onQuizPassed }) {
     );
   }
 
-  // QUESTION BY QUESTION PLAYBACK
+  // QUESTION PLAYBACK SCREEN
   return (
-    <div style={{ ...styles.card, marginTop: 'var(--space-6)' }}>
+    <div style={{ ...STYLES.card, marginTop: 'var(--space-6)' }}>
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h3 style={{ fontSize: 'var(--font-size-lg)', fontWeight: 700, color: 'var(--gray-900)' }}>
+          <h3 style={STYLES.quizTitle}>
             📝 {quiz.title}
           </h3>
           <span className="text-xs text-gray">Passing Score: {quiz.passing_score}%</span>
@@ -209,22 +272,25 @@ function StudentQuizPlayer({ quiz, onQuizPassed }) {
         </Badge>
       </div>
 
-      {error && <Alert type="error" onClose={() => setError('')}>{error}</Alert>}
+      {error && (
+        <Alert type="error" onClose={() => setError('')} aria-live="assertive">
+          {error}
+        </Alert>
+      )}
 
-      <div style={styles.quizQuestionBox}>
-        <p style={styles.questionText}>
+      <div style={STYLES.quizQuestionBox} role="group" aria-labelledby="current-quiz-question">
+        <p id="current-quiz-question" style={STYLES.questionText}>
           {currentQIndex + 1}. {currentQuestion.question_text}
         </p>
 
-        {/* Options */}
-        <div style={{ marginTop: 'var(--space-4)' }}>
+        <div style={STYLES.optionsList} role="radiogroup" aria-label="Quiz Options">
           {currentQuestion.options?.map((opt) => {
             const isSelected = answers[String(currentQuestion.id)] === opt.option_label;
             return (
               <label
                 key={opt.id}
                 style={{
-                  ...styles.quizOptionLabel,
+                  ...STYLES.quizOptionLabel,
                   borderColor: isSelected ? 'var(--primary)' : 'var(--gray-300)',
                   background: isSelected ? 'var(--primary-light)' : '#fff',
                 }}
@@ -235,12 +301,13 @@ function StudentQuizPlayer({ quiz, onQuizPassed }) {
                   value={opt.option_label}
                   checked={isSelected}
                   onChange={() => handleSelectOption(currentQuestion.id, opt.option_label)}
-                  style={{ accentColor: 'var(--primary)', width: 18, height: 18 }}
+                  style={STYLES.radioInput}
+                  aria-label={`Option ${opt.option_label}: ${opt.option_text}`}
                 />
-                <span style={{ fontWeight: 700, color: 'var(--primary)', width: 24 }}>
+                <span style={STYLES.optionLabelBadge} aria-hidden="true">
                   {opt.option_label}
                 </span>
-                <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--gray-800)' }}>
+                <span style={STYLES.optionText}>
                   {opt.option_text}
                 </span>
               </label>
@@ -249,7 +316,7 @@ function StudentQuizPlayer({ quiz, onQuizPassed }) {
         </div>
       </div>
 
-      {/* QUIZ NAVIGATION & SUBMIT */}
+      {/* QUIZ NAVIGATION & SUBMISSION */}
       <div className="flex items-center justify-between mt-6">
         <button
           type="button"
@@ -276,43 +343,49 @@ function StudentQuizPlayer({ quiz, onQuizPassed }) {
             onClick={handleSubmitQuiz}
             disabled={Object.keys(answers).length < questions.length || submitting}
             id="submit-quiz-btn"
+            aria-busy={submitting}
           >
-            {submitting ? <><Spinner /> Submitting Quiz…</> : 'Submit Quiz'}
+            {submitting ? (
+              <span className="flex items-center gap-2">
+                <Spinner /> Submitting Quiz…
+              </span>
+            ) : (
+              'Submit Quiz'
+            )}
           </button>
         )}
       </div>
     </div>
   );
-}
+});
 
-// ============================================================
-// Compute per-module state: LOCKED | AVAILABLE | COMPLETED
-// Rule: A module is LOCKED if any prior module (lower order) is not completed.
-// ============================================================
-function computeModuleStates(modules) {
-  // Sort by module_order to determine lock sequence
-  const sorted = [...modules].sort((a, b) => a.module_order - b.module_order);
+// ============================================================================
+// UTILITIES: Compute Module State Map
+// ============================================================================
+
+const computeModuleStates = (modules) => {
+  const sorted = [...modules].sort((a, b) => (a.module_order ?? 0) - (b.module_order ?? 0));
   const stateMap = {};
   let encounteredIncomplete = false;
 
   for (const m of sorted) {
     if (m.completed) {
-      stateMap[m.id] = 'COMPLETED';
+      stateMap[m.id] = MODULE_STATES.COMPLETED;
     } else if (encounteredIncomplete) {
-      stateMap[m.id] = 'LOCKED';
+      stateMap[m.id] = MODULE_STATES.LOCKED;
     } else {
-      stateMap[m.id] = 'AVAILABLE';
+      stateMap[m.id] = MODULE_STATES.AVAILABLE;
       encounteredIncomplete = true;
     }
   }
 
   return stateMap;
-}
+};
 
+// ============================================================================
+// MAIN PAGE VIEW COMPONENT: Course Learning Experience
+// ============================================================================
 
-// ============================================================
-// Main Page: Student Learning Experience
-// ============================================================
 export default function CourseLearning() {
   const { courseId } = useParams();
   const { user } = useAuth();
@@ -320,14 +393,14 @@ export default function CourseLearning() {
 
   const [course, setCourse] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [pageError, setPageError] = useState('');
 
-  // Module & Slide Navigation
+  // Active Navigation States
   const [activeModuleIdx, setActiveModuleIdx] = useState(0);
-  const [slideIndex, setSlideIndex] = useState(0); // 0-based index of current slide in active module
-  const [viewingMode, setViewingMode] = useState('slides'); // 'slides' | 'quiz'
+  const [slideIndex, setSlideIndex] = useState(0);
+  const [viewingMode, setViewingMode] = useState(VIEW_MODES.SLIDES);
 
-  // Completion & Certificate
+  // Mutation Feedback States
   const [completingMod, setCompletingMod] = useState(false);
   const [moduleError, setModuleError] = useState('');
   const [moduleSuccess, setModuleSuccess] = useState('');
@@ -335,216 +408,242 @@ export default function CourseLearning() {
   const [generatingCert, setGeneratingCert] = useState(false);
   const [certError, setCertError] = useState('');
 
-  const load = useCallback(async () => {
-    if (!user?.id) return;
+  // Race condition guard reference
+  const loadRequestId = useRef(0);
+
+  const loadCourseData = useCallback(async () => {
+    if (!user?.id || !courseId) return;
+
+    const currentReqId = ++loadRequestId.current;
     setLoading(true);
-    setError('');
+    setPageError('');
+
     try {
       const res = await getStudentCourse(user.id, Number(courseId));
-      setCourse(res.course);
+      if (currentReqId === loadRequestId.current) {
+        const fetchedCourse = res?.course;
+        setCourse(fetchedCourse);
 
-      // Default to first uncompleted module
-      const firstIncomplete = res.course.modules?.findIndex((m) => !m.completed);
-      if (firstIncomplete >= 0) {
-        setActiveModuleIdx(firstIncomplete);
+        // Auto-select first uncompleted module
+        const firstIncomplete = fetchedCourse?.modules?.findIndex((m) => !m.completed);
+        if (firstIncomplete >= 0) {
+          setActiveModuleIdx(firstIncomplete);
+        }
       }
     } catch (err) {
-      if (err.message?.includes('403')) {
-        setError('You are not enrolled in this course.');
-      } else {
-        setError(err.message || 'Failed to load course details');
+      if (currentReqId === loadRequestId.current) {
+        if (err.message?.includes('403') || err.status === 403) {
+          setPageError(MESSAGES.NOT_ENROLLED);
+        } else {
+          setPageError(err.message || MESSAGES.LOAD_FAILED);
+        }
       }
     } finally {
-      setLoading(false);
+      if (currentReqId === loadRequestId.current) {
+        setLoading(false);
+      }
     }
   }, [user?.id, courseId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    loadCourseData();
+  }, [loadCourseData]);
 
-  // Reset slide index when active module changes
+  // Reset slide index & errors when active module changes
   useEffect(() => {
     setSlideIndex(0);
-    setViewingMode('slides');
+    setViewingMode(VIEW_MODES.SLIDES);
     setModuleError('');
     setModuleSuccess('');
   }, [activeModuleIdx]);
 
-  async function handleCompleteModule(moduleId) {
+  // Action: Complete Module
+  const handleCompleteModule = useCallback(async (moduleId) => {
     setCompletingMod(true);
     setModuleError('');
     setModuleSuccess('');
+
     try {
       await completeModule(moduleId);
       setModuleSuccess('Module completed successfully!');
-      await load();
+      await loadCourseData();
     } catch (err) {
       if (err.message?.toLowerCase().includes('quiz') || err.message?.includes('pass')) {
-        setModuleError('You must pass the module quiz before marking this module as complete.');
+        setModuleError(MESSAGES.QUIZ_PREREQ);
       } else {
-        setModuleError(err.message || 'Failed to complete module.');
+        setModuleError(err.message || MESSAGES.MODULE_COMPLETE_FAILED);
       }
     } finally {
       setCompletingMod(false);
     }
-  }
+  }, [loadCourseData]);
 
-  async function handleGenerateCertificate() {
+  // Action: Generate Certificate
+  const handleGenerateCertificate = useCallback(async () => {
     setGeneratingCert(true);
     setCertError('');
+
     try {
       await generateCertificate(Number(courseId));
       navigate('/student/certificates');
     } catch (err) {
-      setCertError(err.message || 'Failed to generate certificate.');
+      setCertError(err.message || MESSAGES.CERTIFICATE_FAILED);
     } finally {
       setGeneratingCert(false);
     }
-  }
+  }, [courseId, navigate]);
+
+  // Memoized Course Telemetry
+  const telemetry = useMemo(() => {
+    const modules = course?.modules ?? [];
+    const completedCount = modules.filter((m) => m.completed).length;
+    const progressPct = modules.length > 0 ? Math.round((completedCount / modules.length) * 100) : 0;
+    const isCourseComplete = modules.length > 0 && completedCount === modules.length;
+    const moduleStateMap = computeModuleStates(modules);
+
+    const lessonCount = modules.reduce((acc, m) => acc + (m.contents?.length ?? 0), 0);
+    const quizCount = modules.reduce((acc, m) => acc + (m.quizzes?.length ?? 0), 0);
+
+    return {
+      modules,
+      completedCount,
+      progressPct,
+      isCourseComplete,
+      moduleStateMap,
+      lessonCount,
+      quizCount,
+    };
+  }, [course?.modules]);
+
+  // Safe navigation bounds
+  const safeActiveModuleIdx = useMemo(() => {
+    const modules = telemetry.modules;
+    if (modules.length === 0) return 0;
+    return Math.max(0, Math.min(activeModuleIdx, modules.length - 1));
+  }, [telemetry.modules, activeModuleIdx]);
+
+  const activeModule = telemetry.modules[safeActiveModuleIdx];
+  const slides = useMemo(() => activeModule?.contents ?? [], [activeModule?.contents]);
+
+  const safeSlideIdx = useMemo(() => {
+    if (slides.length === 0) return 0;
+    return Math.max(0, Math.min(slideIndex, slides.length - 1));
+  }, [slides.length, slideIndex]);
+
+  const activeSlide = slides[safeSlideIdx];
+  const hasQuiz = Boolean(activeModule?.quizzes && activeModule.quizzes.length > 0);
+  const quiz = hasQuiz ? activeModule.quizzes[0] : null;
 
   if (loading) {
     return (
       <StudentLayout>
-        <div className="page-container"><LoadingPage message="Loading learning material…" /></div>
-      </StudentLayout>
-    );
-  }
-
-  if (error || !course) {
-    return (
-      <StudentLayout>
         <div className="page-container">
-          <div className="mb-4"><Link to="/student/courses" className="text-gray text-sm">← Back to My Courses</Link></div>
-          <Alert type="error">{error || 'Course not found'}</Alert>
+          <LoadingPage message="Loading learning material…" />
         </div>
       </StudentLayout>
     );
   }
 
-  const modules = course.modules ?? [];
-  const completedCount = modules.filter((m) => m.completed).length;
-  const progressPct = modules.length > 0 ? Math.round((completedCount / modules.length) * 100) : 0;
-  const isCourseComplete = modules.length > 0 && completedCount === modules.length;
-
-  // Compute lock states for the full sidebar
-  const moduleStateMap = computeModuleStates(modules);
-
-  const activeModule = modules[activeModuleIdx];
-  const slides = activeModule?.contents ?? [];
-  const activeSlide = slides[slideIndex];
-  const hasQuiz = activeModule?.quizzes && activeModule.quizzes.length > 0;
-  const quiz = hasQuiz ? activeModule.quizzes[0] : null;
+  if (pageError || !course) {
+    return (
+      <StudentLayout>
+        <div className="page-container">
+          <nav className="mb-4" aria-label="Breadcrumb">
+            <Link to="/student/courses" className="text-gray text-sm">
+              ← Back to My Courses
+            </Link>
+          </nav>
+          <Alert type="error" aria-live="assertive">
+            {pageError || 'Course not found'}
+          </Alert>
+        </div>
+      </StudentLayout>
+    );
+  }
 
   return (
     <StudentLayout>
       <div className="page-container">
-        {/* Breadcrumb */}
-        <div className="mb-4">
-          <Link to="/student/courses" className="text-gray text-sm">← Back to My Courses</Link>
-        </div>
+        {/* Course Hero Banner Component */}
+        <CourseHeader
+          title={course.title}
+          description={course.description}
+          instructor="ED-MAX Training Platform"
+          progressPct={telemetry.progressPct}
+          completedCount={telemetry.completedCount}
+          moduleCount={telemetry.modules.length}
+          lessonCount={telemetry.lessonCount}
+          quizCount={telemetry.quizCount}
+          isCompleted={telemetry.isCourseComplete}
+          action={
+            telemetry.isCourseComplete && (
+              <button
+                type="button"
+                className="btn btn-success btn-lg"
+                onClick={handleGenerateCertificate}
+                disabled={generatingCert}
+                id="generate-cert-banner-btn"
+                aria-busy={generatingCert}
+              >
+                {generatingCert ? (
+                  <span className="flex items-center gap-2">
+                    <Spinner /> Generating…
+                  </span>
+                ) : (
+                  '🎓 View Certificate'
+                )}
+              </button>
+            )
+          }
+        />
 
-        {/* Course Header Banner */}
-        <div className="card mb-6">
-          <div className="card-body">
-            <div className="flex items-start justify-between gap-4 flex-wrap">
-              <div>
-                <h1 className="page-title">{course.title}</h1>
-                <p className="page-subtitle">{course.description}</p>
-              </div>
-              <Badge variant={isCourseComplete ? 'success' : 'primary'}>
-                {isCourseComplete ? '✓ Course Completed' : 'In Progress'}
-              </Badge>
-            </div>
+        {certError && (
+          <Alert type="error" onClose={() => setCertError('')} aria-live="assertive">
+            {certError}
+          </Alert>
+        )}
 
-            {/* REAL BACKEND PROGRESS */}
-            <div style={{ marginTop: 'var(--space-4)' }}>
-              <div className="flex items-center justify-between text-xs text-gray mb-1">
-                <span>Course Progress</span>
-                <span className="font-semibold">{completedCount} of {modules.length} modules complete ({progressPct}%)</span>
-              </div>
-              <ProgressBar value={progressPct} max={100} variant={isCourseComplete ? 'success' : 'primary'} />
-            </div>
-
-            {/* CERTIFICATE BUTTON */}
-            {isCourseComplete && (
-              <div style={{ marginTop: 'var(--space-4)' }}>
-                {certError && <Alert type="error">{certError}</Alert>}
-                <button
-                  type="button"
-                  className="btn btn-success"
-                  onClick={handleGenerateCertificate}
-                  disabled={generatingCert}
-                  id="generate-cert-banner-btn"
-                >
-                  {generatingCert ? <><Spinner /> Generating…</> : '🎓 View Certificate'}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* LEARNING LAYOUT: SIDEBAR + SLIDE CONTENT */}
-        {modules.length === 0 ? (
-          <EmptyState icon="📦" title="No modules available" text="This course has no modules created yet." />
+        {/* LMS Workspace Layout */}
+        {telemetry.modules.length === 0 ? (
+          <EmptyState
+            icon="📦"
+            title="No modules available"
+            text="This course has no modules created yet."
+          />
         ) : (
-          <div className="learning-layout">
-            {/* MODULE NAVIGATION SIDEBAR */}
-            <div className="module-sidebar">
-              <div className="module-sidebar-header">
-                <div className="module-sidebar-title">Course Modules</div>
-                <div className="module-sidebar-progress">{completedCount}/{modules.length} Complete</div>
-              </div>
+          <div className="lms-player-layout">
+            {/* Sidebar Navigation */}
+            <CourseSidebar
+              modules={telemetry.modules}
+              moduleStateMap={telemetry.moduleStateMap}
+              activeModuleIdx={safeActiveModuleIdx}
+              activeSlideIdx={safeSlideIdx}
+              viewingMode={viewingMode}
+              onSelectModule={(mIdx) => setActiveModuleIdx(mIdx)}
+              onSelectSlide={(sIdx) => {
+                setSlideIndex(sIdx);
+                setViewingMode(VIEW_MODES.SLIDES);
+              }}
+              onSelectQuiz={() => setViewingMode(VIEW_MODES.QUIZ)}
+            />
 
-              {modules.map((m, idx) => {
-                const isActive = idx === activeModuleIdx;
-                const mState = moduleStateMap[m.id] ?? 'AVAILABLE';
-                const isLocked = mState === 'LOCKED';
-
-                return (
-                  <div
-                    key={m.id}
-                    className={`module-item${isActive ? ' active' : ''}${isLocked ? ' locked' : ''}`}
-                    onClick={() => !isLocked && setActiveModuleIdx(idx)}
-                    id={`sidebar-mod-${m.id}`}
-                    title={isLocked ? 'Complete previous modules first' : ''}
-                    style={isLocked ? { cursor: 'not-allowed', opacity: 0.55 } : {}}
-                  >
-                    <div
-                      className={`module-item-icon${mState === 'COMPLETED' ? ' completed' : isActive ? ' active' : ''}`}
-                    >
-                      {mState === 'COMPLETED' ? '✓' : isLocked ? '🔒' : idx + 1}
-                    </div>
-
-                    <div className="module-item-text">
-                      <div className="module-item-title">
-                        Module {m.module_order}: {m.title}
-                      </div>
-                      <div className="module-item-sub">
-                        {mState === 'COMPLETED' ? (
-                          <span style={{ color: 'var(--success-text)', fontWeight: 600 }}>✓ Completed</span>
-                        ) : isLocked ? (
-                          <span style={{ color: 'var(--gray-500)' }}>🔒 Locked • {m.contents?.some(c => c.content_type === 'VIDEO') ? '⏱ 40m • Hybrid' : '⏱ 30m • Text'}</span>
-                        ) : (
-                          <span>⏱ {m.contents?.length ? m.contents.length * 15 : 30}m • {m.contents?.some(c => c.content_type === 'VIDEO') ? 'Hybrid' : 'Text'}</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* MAIN SLIDE / QUIZ CONTENT AREA */}
-            <div className="content-area">
+            {/* Main Learning Area */}
+            <main className="content-area" aria-label="Course Content Workspace">
               {activeModule && (
                 <>
-                  {/* Module Header Bar */}
-                  <div className="content-header">
+                  {/* Module Breadcrumb & Mode Toggle Bar */}
+                  <div style={STYLES.contentHeaderBar}>
                     <div className="flex items-center justify-between flex-wrap gap-3">
                       <div>
-                        <h2 style={{ fontSize: 'var(--font-size-lg)', fontWeight: 700, color: 'var(--gray-900)' }}>
-                          Module {activeModule.module_order}: {activeModule.title}
+                        <div style={STYLES.moduleBreadcrumbSub}>
+                          Module {activeModule.module_order ?? (safeActiveModuleIdx + 1)} of {telemetry.modules.length} • {activeModule.contents?.length ?? 0} lessons
+                        </div>
+                        <h2 style={STYLES.activeModuleTitle}>
+                          {viewingMode === VIEW_MODES.QUIZ
+                            ? `📝 ${quiz?.title || 'Module Quiz'}`
+                            : activeSlide?.title || activeModule.title || 'Lesson Content'}
                         </h2>
-                        {activeModule.description && (
+                        {activeModule.description && viewingMode === VIEW_MODES.SLIDES && (
                           <p className="text-xs text-gray mt-1">{activeModule.description}</p>
                         )}
                       </div>
@@ -553,11 +652,15 @@ export default function CourseLearning() {
                         {hasQuiz && (
                           <button
                             type="button"
-                            className={`btn btn-sm${viewingMode === 'quiz' ? ' btn-primary' : ' btn-outline'}`}
-                            onClick={() => setViewingMode(viewingMode === 'quiz' ? 'slides' : 'quiz')}
+                            className={`btn btn-sm${viewingMode === VIEW_MODES.QUIZ ? ' btn-primary' : ' btn-outline'}`}
+                            onClick={() =>
+                              setViewingMode((prev) =>
+                                prev === VIEW_MODES.QUIZ ? VIEW_MODES.SLIDES : VIEW_MODES.QUIZ
+                              )
+                            }
                             id="toggle-quiz-view-btn"
                           >
-                            {viewingMode === 'quiz' ? '📄 Back to Slides' : '📝 Take Quiz'}
+                            {viewingMode === VIEW_MODES.QUIZ ? '📄 Back to Lessons' : '📝 Take Quiz'}
                           </button>
                         )}
 
@@ -568,14 +671,22 @@ export default function CourseLearning() {
                     </div>
                   </div>
 
-                  {/* Body Content */}
+                  {/* Main Display Body */}
                   <div className="content-body">
-                    {moduleError && <Alert type="error" onClose={() => setModuleError('')}>{moduleError}</Alert>}
-                    {moduleSuccess && <Alert type="success" onClose={() => setModuleSuccess('')}>{moduleSuccess}</Alert>}
+                    {moduleError && (
+                      <Alert type="error" onClose={() => setModuleError('')} aria-live="assertive">
+                        {moduleError}
+                      </Alert>
+                    )}
+                    {moduleSuccess && (
+                      <Alert type="success" onClose={() => setModuleSuccess('')} aria-live="polite">
+                        {moduleSuccess}
+                      </Alert>
+                    )}
 
-                    {/* MODE 1: SLIDES PRESENTATION */}
-                    {viewingMode === 'slides' && (
-                      <div>
+                    {/* VIEW MODE: SLIDES PRESENTATION */}
+                    {viewingMode === VIEW_MODES.SLIDES && (
+                      <section aria-label="Lesson Slides Presentation">
                         {slides.length === 0 ? (
                           <EmptyState
                             icon="📄"
@@ -583,7 +694,11 @@ export default function CourseLearning() {
                             text="This module has no training slides."
                             action={
                               hasQuiz && (
-                                <button type="button" className="btn btn-primary" onClick={() => setViewingMode('quiz')}>
+                                <button
+                                  type="button"
+                                  className="btn btn-primary"
+                                  onClick={() => setViewingMode(VIEW_MODES.QUIZ)}
+                                >
                                   Go to Quiz
                                 </button>
                               )
@@ -591,104 +706,131 @@ export default function CourseLearning() {
                           />
                         ) : (
                           <div>
-                            {/* SLIDE CARD */}
-                            <div style={styles.slideCard}>
-                              <div className="flex items-center justify-between mb-4 pb-2" style={{ borderBottom: '1px solid var(--gray-200)' }}>
+                            <div style={STYLES.slideCard}>
+                              <div style={STYLES.slideCardHeader}>
                                 <span className="text-xs font-semibold text-gray">
-                                  Slide {slideIndex + 1} of {slides.length}
+                                  Lesson {safeSlideIdx + 1} of {slides.length}
                                 </span>
-                                <Badge variant={activeSlide?.content_type === 'VIDEO' ? 'primary' : 'gray'}>
-                                  {activeSlide?.content_type === 'VIDEO' ? '🎥 Video Slide' : '📄 Text Slide'}
+                                <Badge variant={activeSlide?.content_type === CONTENT_TYPES.VIDEO ? 'primary' : 'gray'}>
+                                  {activeSlide?.content_type === CONTENT_TYPES.VIDEO ? '🎥 Video Lesson' : '📄 Text Lesson'}
                                 </Badge>
                               </div>
 
-                              {/* SLIDE CONTENT */}
                               <ContentSlideView contentItem={activeSlide} />
                             </div>
 
-                            {/* SLIDE NAVIGATION CONTROLS */}
+                            {/* Slide Navigation Controls */}
                             <div className="flex items-center justify-between mt-6">
                               <button
                                 type="button"
                                 className="btn btn-outline"
                                 onClick={() => setSlideIndex((i) => Math.max(0, i - 1))}
-                                disabled={slideIndex === 0}
+                                disabled={safeSlideIdx === 0}
                                 id="prev-slide-btn"
                               >
-                                ← Previous Slide
+                                ← Previous Lesson
                               </button>
 
                               <span className="text-xs text-gray font-semibold">
-                                {slideIndex + 1} / {slides.length}
+                                {safeSlideIdx + 1} / {slides.length}
                               </span>
 
-                              {slideIndex < slides.length - 1 ? (
+                              {safeSlideIdx < slides.length - 1 ? (
                                 <button
                                   type="button"
                                   className="btn btn-primary"
                                   onClick={() => setSlideIndex((i) => Math.min(slides.length - 1, i + 1))}
                                   id="next-slide-btn"
                                 >
-                                  Next Slide →
+                                  Next Lesson →
+                                </button>
+                              ) : hasQuiz ? (
+                                <button
+                                  type="button"
+                                  className="btn btn-primary btn-lg"
+                                  onClick={() => setViewingMode(VIEW_MODES.QUIZ)}
+                                  id="continue-to-quiz-btn"
+                                >
+                                  Continue to Quiz →
                                 </button>
                               ) : (
-                                hasQuiz ? (
+                                !activeModule.completed && (
                                   <button
                                     type="button"
-                                    className="btn btn-primary btn-lg"
-                                    onClick={() => setViewingMode('quiz')}
-                                    id="continue-to-quiz-btn"
+                                    className="btn btn-success btn-lg"
+                                    onClick={() => handleCompleteModule(activeModule.id)}
+                                    disabled={completingMod}
+                                    id="complete-module-slide-btn"
+                                    aria-busy={completingMod}
                                   >
-                                    Continue to Quiz →
+                                    {completingMod ? (
+                                      <span className="flex items-center gap-2">
+                                        <Spinner /> Completing…
+                                      </span>
+                                    ) : (
+                                      '✅ Complete Module'
+                                    )}
                                   </button>
-                                ) : (
-                                  !activeModule.completed && (
-                                    <button
-                                      type="button"
-                                      className="btn btn-success btn-lg"
-                                      onClick={() => handleCompleteModule(activeModule.id)}
-                                      disabled={completingMod}
-                                      id="complete-module-slide-btn"
-                                    >
-                                      {completingMod ? <><Spinner /> Completing…</> : '✅ Complete Module'}
-                                    </button>
-                                  )
                                 )
                               )}
                             </div>
                           </div>
                         )}
-                      </div>
+                      </section>
                     )}
 
-                    {/* MODE 2: QUIZ PLAYER */}
-                    {viewingMode === 'quiz' && quiz && (
-                      <StudentQuizPlayer
-                        quiz={quiz}
-                        onQuizPassed={() => {
-                          load();
-                        }}
+                    {/* VIEW MODE: QUIZ PLAYER */}
+                    {viewingMode === VIEW_MODES.QUIZ && quiz && (
+                      <section aria-label="Module Assessment Quiz">
+                        <StudentQuizPlayer
+                          quiz={quiz}
+                          onQuizPassed={loadCourseData}
+                        />
+                      </section>
+                    )}
+
+                    {viewingMode === VIEW_MODES.QUIZ && !quiz && (
+                      <EmptyState
+                        icon="📝"
+                        title="No Quiz Configured"
+                        text="This module does not have a quiz configured yet."
+                        action={
+                          <button
+                            type="button"
+                            className="btn btn-primary"
+                            onClick={() => setViewingMode(VIEW_MODES.SLIDES)}
+                          >
+                            Back to Lessons
+                          </button>
+                        }
                       />
                     )}
 
-                    {/* MODULE COMPLETION BUTTON (when slides or quiz done) */}
+                    {/* FINAL MODULE COMPLETION BAR (When ready) */}
                     {!activeModule.completed && (hasQuiz ? quiz?.last_attempt?.passed : true) && (
-                      <div style={{ marginTop: 'var(--space-6)', paddingTop: 'var(--space-4)', borderTop: '1px solid var(--gray-200)', textAlign: 'right' }}>
+                      <div style={STYLES.finalCompletionBar}>
                         <button
                           type="button"
                           className="btn btn-success btn-lg"
                           onClick={() => handleCompleteModule(activeModule.id)}
                           disabled={completingMod}
                           id="mark-module-complete-final-btn"
+                          aria-busy={completingMod}
                         >
-                          {completingMod ? <><Spinner /> Completing…</> : '✅ Mark Module as Complete'}
+                          {completingMod ? (
+                            <span className="flex items-center gap-2">
+                              <Spinner /> Completing…
+                            </span>
+                          ) : (
+                            '✅ Mark Module as Complete'
+                          )}
                         </button>
                       </div>
                     )}
                   </div>
                 </>
               )}
-            </div>
+            </main>
           </div>
         )}
       </div>
@@ -696,7 +838,11 @@ export default function CourseLearning() {
   );
 }
 
-const styles = {
+// ============================================================================
+// STYLES (Performance tokens frozen in memory)
+// ============================================================================
+
+const STYLES = Object.freeze({
   card: {
     background: '#fff',
     border: '1px solid var(--gray-200)',
@@ -710,12 +856,23 @@ const styles = {
     borderRadius: 'var(--radius-lg)',
     padding: 'var(--space-6)',
     boxShadow: 'var(--shadow-sm)',
-    minHeight: 280,
+    minHeight: '280px',
+  },
+  slideCardHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 'var(--space-4)',
+    paddingBottom: 'var(--space-2)',
+    borderBottom: '1px solid var(--gray-200)',
   },
   textContent: {
     fontSize: 'var(--font-size-base)',
     lineHeight: 1.8,
     color: 'var(--gray-800)',
+  },
+  textParagraph: {
+    marginBottom: 'var(--space-4)',
   },
   videoEmbedWrapper: {
     position: 'relative',
@@ -733,6 +890,69 @@ const styles = {
     height: '100%',
     border: 'none',
   },
+  directVideoPlayer: {
+    width: '100%',
+    maxHeight: '420px',
+    borderRadius: 'var(--radius-lg)',
+  },
+  externalResourceCard: {
+    background: 'var(--info-light)',
+    border: '1px solid #bae6fd',
+    borderRadius: 'var(--radius-lg)',
+    padding: 'var(--space-6)',
+    textAlign: 'center',
+  },
+  externalResourceIcon: {
+    fontSize: '2.5rem',
+    marginBottom: 'var(--space-2)',
+  },
+  externalResourceTitle: {
+    fontSize: 'var(--font-size-base)',
+    fontWeight: 700,
+    color: '#075985',
+    marginBottom: 'var(--space-2)',
+  },
+  externalResourceSubtitle: {
+    fontSize: 'var(--font-size-sm)',
+    color: '#0369a1',
+    marginBottom: 'var(--space-4)',
+  },
+  emptyQuizBox: {
+    marginTop: 'var(--space-4)',
+  },
+  resultBanner: {
+    borderRadius: 'var(--radius-lg)',
+    padding: 'var(--space-6)',
+    textAlign: 'center',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+  },
+  resultEmoji: {
+    fontSize: '3.5rem',
+  },
+  resultHeading: {
+    fontSize: 'var(--font-size-2xl)',
+    fontWeight: 700,
+    margin: 'var(--space-2) 0',
+  },
+  resultScoreText: {
+    fontSize: 'var(--font-size-base)',
+  },
+  retryContainer: {
+    marginTop: 'var(--space-4)',
+  },
+  retrySubText: {
+    color: 'var(--danger-text)',
+  },
+  passedNotice: {
+    marginTop: 'var(--space-4)',
+    color: 'var(--success-text)',
+  },
+  quizTitle: {
+    fontSize: 'var(--font-size-lg)',
+    fontWeight: 700,
+    color: 'var(--gray-900)',
+  },
   quizQuestionBox: {
     background: 'var(--gray-50)',
     border: '1px solid var(--gray-200)',
@@ -743,6 +963,9 @@ const styles = {
     fontSize: 'var(--font-size-lg)',
     fontWeight: 600,
     color: 'var(--gray-900)',
+  },
+  optionsList: {
+    marginTop: 'var(--space-4)',
   },
   quizOptionLabel: {
     display: 'flex',
@@ -755,4 +978,42 @@ const styles = {
     marginBottom: 'var(--space-3)',
     transition: 'all var(--transition)',
   },
-};
+  radioInput: {
+    accentColor: 'var(--primary)',
+    width: '18px',
+    height: '18px',
+  },
+  optionLabelBadge: {
+    fontWeight: 700,
+    color: 'var(--primary)',
+    width: '24px',
+  },
+  optionText: {
+    fontSize: 'var(--font-size-sm)',
+    color: 'var(--gray-800)',
+  },
+  contentHeaderBar: {
+    background: '#fff',
+    border: '1px solid #e2e8f0',
+    borderRadius: '14px',
+    padding: '1.25rem',
+    marginBottom: '1.25rem',
+  },
+  moduleBreadcrumbSub: {
+    fontSize: '0.75rem',
+    color: '#64748b',
+    marginBottom: '0.25rem',
+  },
+  activeModuleTitle: {
+    fontSize: '1.25rem',
+    fontWeight: 800,
+    color: '#0f172a',
+    margin: 0,
+  },
+  finalCompletionBar: {
+    marginTop: 'var(--space-6)',
+    paddingTop: 'var(--space-4)',
+    borderTop: '1px solid var(--gray-200)',
+    textAlign: 'right',
+  },
+});

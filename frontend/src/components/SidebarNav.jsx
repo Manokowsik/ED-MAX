@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { getNotifications, markNotificationRead } from '../services/api';
+import { getNotifications, markNotificationRead, markAllNotificationsRead } from '../services/api';
 import VerifyModal from './VerifyModal';
 
 const COURSE_ICONS = {
@@ -33,6 +33,24 @@ export default function SidebarNav() {
   useEffect(() => {
     loadNotifications();
   }, [loadNotifications]);
+
+  const handleMarkAllRead = useCallback(async () => {
+    try {
+      await markAllNotificationsRead();
+      setUnreadCount(0);
+      setNotifications((prev) => prev.map((item) => ({ ...item, is_read: true })));
+    } catch {
+      // Ignore background errors
+    }
+  }, []);
+
+  const handleToggleNotifications = useCallback(() => {
+    const nextState = !showNotifications;
+    setShowNotifications(nextState);
+    if (nextState && unreadCount > 0) {
+      handleMarkAllRead();
+    }
+  }, [showNotifications, unreadCount, handleMarkAllRead]);
 
   const navItems = isAdmin
     ? [
@@ -101,7 +119,7 @@ export default function SidebarNav() {
           <button
             type="button"
             className="sv2-mobile-icon-btn"
-            onClick={() => setShowNotifications(!showNotifications)}
+            onClick={handleToggleNotifications}
             aria-label="Notifications"
             title="Notifications"
             style={{
@@ -157,7 +175,18 @@ export default function SidebarNav() {
         }}>
           <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#0f172a', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span>Notifications {unreadCount > 0 && `(${unreadCount})`}</span>
-            <span style={{ fontSize: '0.75rem', color: '#6366f1', cursor: 'pointer' }} onClick={() => setShowNotifications(false)}>Close</span>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              {unreadCount > 0 && (
+                <button
+                  type="button"
+                  onClick={handleMarkAllRead}
+                  style={{ background: 'none', border: 'none', fontSize: '0.75rem', color: '#6366f1', fontWeight: 600, cursor: 'pointer' }}
+                >
+                  Mark all read
+                </button>
+              )}
+              <span style={{ fontSize: '0.75rem', color: '#64748b', cursor: 'pointer' }} onClick={() => setShowNotifications(false)}>Close</span>
+            </div>
           </div>
           {notifications.length === 0 ? (
             <div style={{ fontSize: '0.75rem', color: '#64748b', borderTop: '1px solid #f1f5f9', paddingTop: '8px' }}>

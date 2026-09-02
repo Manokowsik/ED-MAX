@@ -1,140 +1,226 @@
-import { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { adminSignup } from '../services/api';
 import { Alert, Spinner } from '../components/ui';
 
-export default function Signup() {
-  const navigate = useNavigate();
+// ============================================================================
+// CONSTANTS & UTILITIES
+// ============================================================================
 
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+const INITIAL_FORM_STATE = {
+  name: '',
+  email: '',
+  password: '',
+  confirmPassword: '',
+};
 
+const ERROR_MESSAGES = {
+  REQUIRED_NAME: 'Full name is required.',
+  REQUIRED_EMAIL: 'Email is required.',
+  INVALID_EMAIL: 'Please enter a valid email address.',
+  REQUIRED_PASSWORD: 'Password is required.',
+  SHORT_PASSWORD: 'Password must be at least 8 characters.',
+  REQUIRED_CONFIRM: 'Please confirm your password.',
+  MISMATCH_PASSWORD: 'Passwords do not match.',
+  NETWORK_ERROR: 'Unable to connect to the server. Please check your connection.',
+  ACCOUNT_EXISTS: 'An account with this email already exists.',
+  GENERIC_ERROR: 'Registration failed. Please try again.',
+};
+
+/**
+ * Pure function for form validation. Easy to unit test independently.
+ * @param {typeof INITIAL_FORM_STATE} data 
+ * @returns {Record<string, string>}
+ */
+const validateSignupForm = (data) => {
+  const errors = {};
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  if (!data.name.trim()) errors.name = ERROR_MESSAGES.REQUIRED_NAME;
+  
+  if (!data.email.trim()) {
+    errors.email = ERROR_MESSAGES.REQUIRED_EMAIL;
+  } else if (!emailRegex.test(data.email.trim())) {
+    errors.email = ERROR_MESSAGES.INVALID_EMAIL;
+  }
+
+  if (!data.password) {
+    errors.password = ERROR_MESSAGES.REQUIRED_PASSWORD;
+  } else if (data.password.length < 8) {
+    errors.password = ERROR_MESSAGES.SHORT_PASSWORD;
+  }
+
+  if (!data.confirmPassword) {
+    errors.confirmPassword = ERROR_MESSAGES.REQUIRED_CONFIRM;
+  } else if (data.password !== data.confirmPassword) {
+    errors.confirmPassword = ERROR_MESSAGES.MISMATCH_PASSWORD;
+  }
+
+  return errors;
+};
+
+// ============================================================================
+// CUSTOM HOOK: Business Logic Separation
+// ============================================================================
+
+function useSignupLogic() {
+  const [formData, setFormData] = useState(INITIAL_FORM_STATE);
   const [errors, setErrors] = useState({});
   const [serverError, setServerError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [success, setSuccess] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
 
-  // ----------------------------------------------------------
-  // Client-side validation
-  // ----------------------------------------------------------
-  function validate() {
-    const errs = {};
-
-    if (!name.trim()) errs.name = 'Full name is required.';
-    if (!email.trim()) {
-      errs.email = 'Email is required.';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      errs.email = 'Please enter a valid email address.';
+  // Grouped change handler prevents creating multiple inline functions
+  const handleChange = useCallback((e) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+    
+    // Clear specific field error on typing
+    if (errors[name]) {
+      setErrors((prev) => ({ ...prev, [name]: '' }));
     }
-    if (!password) {
-      errs.password = 'Password is required.';
-    } else if (password.length < 8) {
-      errs.password = 'Password must be at least 8 characters.';
-    }
-    if (!confirmPassword) {
-      errs.confirmPassword = 'Please confirm your password.';
-    } else if (password !== confirmPassword) {
-      errs.confirmPassword = 'Passwords do not match.';
-    }
+  }, [errors]);
 
-    setErrors(errs);
-    return Object.keys(errs).length === 0;
-  }
-
-  // ----------------------------------------------------------
-  // Submit
-  // ----------------------------------------------------------
-  async function handleSubmit(e) {
+  const handleSubmit = useCallback(async (e) => {
     e.preventDefault();
     setServerError('');
+    
+    const validationErrors = validateSignupForm(formData);
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
+      return;
+    }
 
-    if (!validate()) return;
-    if (loading) return; // prevent duplicate submissions
+    if (loading) return;
 
     setLoading(true);
     try {
-      await adminSignup(name.trim(), email.trim(), password, confirmPassword);
-      setSuccess(true);
+      await adminSignup(
+        formData.name.trim(),
+        formData.email.trim(),
+        formData.password,
+        formData.confirmPassword
+      );
+      setIsSuccess(true);
     } catch (err) {
-      if (err.message?.toLowerCase().includes('already exists')) {
-        setServerError('An account with this email already exists.');
-      } else if (err.message?.toLowerCase().includes('network') || err.message?.toLowerCase().includes('fetch')) {
-        setServerError('Unable to connect to the server. Please check your connection.');
+      const errorMessage = err.message?.toLowerCase() || '';
+      if (errorMessage.includes('already exists')) {
+        setServerError(ERROR_MESSAGES.ACCOUNT_EXISTS);
+      } else if (errorMessage.includes('network') || errorMessage.includes('fetch')) {
+        setServerError(ERROR_MESSAGES.NETWORK_ERROR);
       } else {
-        setServerError(err.message || 'Registration failed. Please try again.');
+        setServerError(err.message || ERROR_MESSAGES.GENERIC_ERROR);
       }
     } finally {
       setLoading(false);
     }
-  }
+  }, [formData, loading]);
 
-  // ----------------------------------------------------------
-  // Success State
-  // ----------------------------------------------------------
-  if (success) {
-    return (
-      <div style={styles.page}>
-        <div style={styles.card}>
-          <div style={styles.brand}>
-            <div style={styles.brandLogo}>🎓</div>
-            <h1 style={styles.brandName}>ED-MAX</h1>
-            <p style={styles.brandSub}>Employee Training &amp; Learning Platform</p>
-          </div>
+  const clearServerError = useCallback(() => setServerError(''), []);
 
-          <div style={styles.successBox}>
-            <div style={styles.successIcon}>📧</div>
-            <h2 style={styles.successTitle}>Account Created!</h2>
-            <p style={styles.successText}>
-              Your admin account has been created. A verification code (OTP) has been sent to <strong>{email}</strong>.
-            </p>
-            <button
-              id="goto-verify-btn"
-              className="btn btn-primary btn-full btn-lg"
-              style={{ marginTop: 'var(--space-4)' }}
-              onClick={() => navigate('/verify-email', { state: { email: email.trim() } })}
-            >
-              Verify Email Now
-            </button>
-          </div>
+  return {
+    formData,
+    errors,
+    serverError,
+    loading,
+    isSuccess,
+    handleChange,
+    handleSubmit,
+    clearServerError,
+  };
+}
 
+// ============================================================================
+// SUB-COMPONENTS
+// ============================================================================
+
+const SuccessView = ({ email }) => {
+  const navigate = useNavigate();
+
+  return (
+    <div style={STYLES.page}>
+      <div style={STYLES.card}>
+        <div style={STYLES.brand}>
+          <div style={STYLES.brandLogo}>🎓</div>
+          <h1 style={STYLES.brandName}>ED-MAX</h1>
+          <p style={STYLES.brandSub}>Employee Training &amp; Learning Platform</p>
+        </div>
+
+        <div style={STYLES.successBox}>
+          <div style={STYLES.successIcon}>📧</div>
+          <h2 style={STYLES.successTitle}>Account Created!</h2>
+          <p style={STYLES.successText}>
+            Your admin account has been created. A verification code (OTP) has been sent to <strong>{email}</strong>.
+          </p>
+          <button
+            id="goto-verify-btn"
+            className="btn btn-primary btn-full btn-lg"
+            style={{ marginTop: 'var(--space-4)' }}
+            onClick={() => navigate('/verify-email', { state: { email } })}
+          >
+            Verify Email Now
+          </button>
         </div>
       </div>
-    );
+    </div>
+  );
+};
+
+// ============================================================================
+// MAIN COMPONENT (UI Layer only)
+// ============================================================================
+
+export default function Signup() {
+  const {
+    formData,
+    errors,
+    serverError,
+    loading,
+    isSuccess,
+    handleChange,
+    handleSubmit,
+    clearServerError,
+  } = useSignupLogic();
+
+  if (isSuccess) {
+    return <SuccessView email={formData.email.trim()} />;
   }
 
-  // ----------------------------------------------------------
-  // Form
-  // ----------------------------------------------------------
   return (
-    <div style={styles.page}>
-      <div style={styles.card}>
-        {/* Brand */}
-        <div style={styles.brand}>
-          <div style={styles.brandLogo}>🎓</div>
-          <h1 style={styles.brandName}>ED-MAX</h1>
-          <p style={styles.brandSub}>Create Admin Account</p>
-        </div>
+    <div style={STYLES.page}>
+      <div style={STYLES.card}>
+        {/* Brand Header */}
+        <header style={STYLES.brand}>
+          <div style={STYLES.brandLogo}>🎓</div>
+          <h1 style={STYLES.brandName}>ED-MAX</h1>
+          <p style={STYLES.brandSub}>Create Admin Account</p>
+        </header>
 
-        {/* Form */}
+        {/* Signup Form */}
         <form onSubmit={handleSubmit} noValidate>
-          {serverError && <Alert type="error" onClose={() => setServerError('')}>{serverError}</Alert>}
+          {serverError && (
+            <Alert type="error" onClose={clearServerError} aria-live="assertive">
+              {serverError}
+            </Alert>
+          )}
 
           {/* Full Name */}
           <div className="form-group">
             <label className="form-label" htmlFor="signup-name">Full name</label>
             <input
               id="signup-name"
+              name="name"
               type="text"
-              className={`form-input${errors.name ? ' error' : ''}`}
+              className={`form-input ${errors.name ? 'error' : ''}`}
               placeholder="John Doe"
-              value={name}
-              onChange={e => { setName(e.target.value); if (errors.name) setErrors(p => ({ ...p, name: '' })); }}
+              value={formData.name}
+              onChange={handleChange}
               autoComplete="name"
               disabled={loading}
+              aria-invalid={!!errors.name}
+              aria-describedby={errors.name ? "name-error" : undefined}
             />
-            {errors.name && <div className="form-error">{errors.name}</div>}
+            {errors.name && <div id="name-error" className="form-error" role="alert">{errors.name}</div>}
           </div>
 
           {/* Email */}
@@ -142,15 +228,18 @@ export default function Signup() {
             <label className="form-label" htmlFor="signup-email">Email address</label>
             <input
               id="signup-email"
+              name="email"
               type="email"
-              className={`form-input${errors.email ? ' error' : ''}`}
+              className={`form-input ${errors.email ? 'error' : ''}`}
               placeholder="you@example.com"
-              value={email}
-              onChange={e => { setEmail(e.target.value); if (errors.email) setErrors(p => ({ ...p, email: '' })); }}
+              value={formData.email}
+              onChange={handleChange}
               autoComplete="email"
               disabled={loading}
+              aria-invalid={!!errors.email}
+              aria-describedby={errors.email ? "email-error" : undefined}
             />
-            {errors.email && <div className="form-error">{errors.email}</div>}
+            {errors.email && <div id="email-error" className="form-error" role="alert">{errors.email}</div>}
           </div>
 
           {/* Password */}
@@ -158,15 +247,18 @@ export default function Signup() {
             <label className="form-label" htmlFor="signup-password">Password</label>
             <input
               id="signup-password"
+              name="password"
               type="password"
-              className={`form-input${errors.password ? ' error' : ''}`}
+              className={`form-input ${errors.password ? 'error' : ''}`}
               placeholder="Min. 8 characters"
-              value={password}
-              onChange={e => { setPassword(e.target.value); if (errors.password) setErrors(p => ({ ...p, password: '' })); }}
+              value={formData.password}
+              onChange={handleChange}
               autoComplete="new-password"
               disabled={loading}
+              aria-invalid={!!errors.password}
+              aria-describedby={errors.password ? "password-error" : undefined}
             />
-            {errors.password && <div className="form-error">{errors.password}</div>}
+            {errors.password && <div id="password-error" className="form-error" role="alert">{errors.password}</div>}
           </div>
 
           {/* Confirm Password */}
@@ -174,42 +266,54 @@ export default function Signup() {
             <label className="form-label" htmlFor="signup-confirm-password">Confirm password</label>
             <input
               id="signup-confirm-password"
+              name="confirmPassword"
               type="password"
-              className={`form-input${errors.confirmPassword ? ' error' : ''}`}
+              className={`form-input ${errors.confirmPassword ? 'error' : ''}`}
               placeholder="Re-enter your password"
-              value={confirmPassword}
-              onChange={e => { setConfirmPassword(e.target.value); if (errors.confirmPassword) setErrors(p => ({ ...p, confirmPassword: '' })); }}
+              value={formData.confirmPassword}
+              onChange={handleChange}
               autoComplete="new-password"
               disabled={loading}
+              aria-invalid={!!errors.confirmPassword}
+              aria-describedby={errors.confirmPassword ? "confirm-password-error" : undefined}
             />
-            {errors.confirmPassword && <div className="form-error">{errors.confirmPassword}</div>}
+            {errors.confirmPassword && <div id="confirm-password-error" className="form-error" role="alert">{errors.confirmPassword}</div>}
           </div>
 
+          {/* Submit Button */}
           <button
             id="signup-btn"
             type="submit"
             className="btn btn-primary btn-full btn-lg"
             style={{ marginTop: 'var(--space-2)' }}
             disabled={loading}
+            aria-busy={loading}
           >
             {loading ? (
               <span className="flex items-center gap-2 justify-center">
                 <Spinner /> Creating account…
               </span>
-            ) : 'Create Account'}
+            ) : (
+              'Create Account'
+            )}
           </button>
         </form>
 
-        <p style={styles.footer}>
-          Already have an account?{' '}
-          <Link to="/login" style={styles.link}>Sign in</Link>
-        </p>
+        <footer style={STYLES.footer}>
+          <p>
+            Already have an account?{' '}
+            <Link to="/login" style={STYLES.link}>Sign in</Link>
+          </p>
+        </footer>
       </div>
     </div>
   );
 }
 
-const styles = {
+// ============================================================================
+// STYLES (Frozen to prevent re-creation on render)
+// ============================================================================
+const STYLES = Object.freeze({
   page: {
     minHeight: '100vh',
     background: 'linear-gradient(135deg, #1e1b4b 0%, #4f46e5 100%)',
@@ -286,4 +390,4 @@ const styles = {
     lineHeight: 1.6,
     margin: 0,
   },
-};
+});

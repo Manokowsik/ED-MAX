@@ -1,154 +1,292 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { validateInvitationToken, acceptInvitation } from '../services/api';
 import { Alert, Spinner } from '../components/ui';
 
-/**
- * AcceptInvitation page — /accept-invitation?token=...
- *
- * Handles the "existing user added to a new org" flow.
- * The user already has an account and password; they only need to click "Accept".
- */
-export default function AcceptInvitation() {
+// ============================================================================
+// CONSTANTS & CONFIGURATION
+// ============================================================================
+
+const VIEW_STATES = Object.freeze({
+  VALIDATING: 'VALIDATING',
+  READY: 'READY',
+  ACCEPTING: 'ACCEPTING',
+  SUCCESS: 'SUCCESS',
+  INVALID_TOKEN: 'INVALID_TOKEN',
+});
+
+const MESSAGES = Object.freeze({
+  MISSING_OR_INVALID_LINK: 'Invalid or missing invitation link.',
+  EXPIRED_OR_USED_LINK: 'Invalid, expired, or already used invitation link.',
+  ACCEPT_FAILED: 'Failed to accept invitation. Please try again.',
+  SUCCESS_FALLBACK: (orgName) =>
+    `You've successfully joined ${orgName || 'the organization'}. You can now sign in.`,
+});
+
+// ============================================================================
+// CUSTOM HOOK: Invitation Flow Business Logic
+// ============================================================================
+
+function useAcceptInvitationLogic() {
   const [searchParams] = useSearchParams();
-  const token = searchParams.get('token') || '';
+  const rawToken = searchParams.get('token');
+  const token = useMemo(() => (rawToken ? rawToken.trim() : ''), [rawToken]);
 
-  const [validating, setValidating] = useState(true);
-  const [info, setInfo] = useState(null);         // { user, organization }
+  const [viewState, setViewState] = useState(VIEW_STATES.VALIDATING);
+  const [invitationInfo, setInvitationInfo] = useState(null);
   const [tokenError, setTokenError] = useState('');
+  const [mutationError, setMutationError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
 
-  const [accepting, setAccepting] = useState(false);
-  const [success, setSuccess] = useState('');
-  const [error, setError] = useState('');
+  const activeRequestId = useRef(0);
 
+  // Validate Token on Mount or Token Change
   useEffect(() => {
     if (!token) {
-      setTokenError('Invalid or missing invitation link.');
-      setValidating(false);
+      setTokenError(MESSAGES.MISSING_OR_INVALID_LINK);
+      setViewState(VIEW_STATES.INVALID_TOKEN);
       return;
     }
+
+    const currentRequestId = ++activeRequestId.current;
+    setViewState(VIEW_STATES.VALIDATING);
+    setTokenError('');
 
     async function checkToken() {
       try {
         const res = await validateInvitationToken(token);
-        setInfo(res);
+        if (currentRequestId === activeRequestId.current) {
+          setInvitationInfo(res);
+          setViewState(VIEW_STATES.READY);
+        }
       } catch (err) {
-        setTokenError(err.message || 'Invalid, expired, or already used invitation link.');
-      } finally {
-        setValidating(false);
+        if (currentRequestId === activeRequestId.current) {
+          setTokenError(err.message || MESSAGES.EXPIRED_OR_USED_LINK);
+          setViewState(VIEW_STATES.INVALID_TOKEN);
+        }
       }
     }
 
     checkToken();
   }, [token]);
 
-  async function handleAccept() {
-    setError('');
-    setAccepting(true);
+  // Accept Mutation
+  const handleAccept = useCallback(async () => {
+    if (!token) return;
+
+    setMutationError('');
+    setViewState(VIEW_STATES.ACCEPTING);
+
     try {
       const res = await acceptInvitation(token);
-      setSuccess(res.message || `You've successfully joined ${info?.organization?.name || 'the organization'}. You can now sign in.`);
-      setInfo(null);
+      const orgName = invitationInfo?.organization?.name;
+      setSuccessMessage(res?.message || MESSAGES.SUCCESS_FALLBACK(orgName));
+      setInvitationInfo(null);
+      setViewState(VIEW_STATES.SUCCESS);
     } catch (err) {
-      setError(err.message || 'Failed to accept invitation. Please try again.');
-    } finally {
-      setAccepting(false);
+      setMutationError(err.message || MESSAGES.ACCEPT_FAILED);
+      setViewState(VIEW_STATES.READY);
     }
-  }
+  }, [token, invitationInfo?.organization?.name]);
 
-  if (validating) {
-    return (
-      <div style={styles.page}>
-        <div style={styles.card}>
-          <div style={{ textAlign: 'center', padding: '2rem 0' }}>
-            <Spinner />
-            <p style={{ marginTop: '1rem', color: 'var(--gray-600)' }}>Validating invitation…</p>
-          </div>
-        </div>
+  const clearMutationError = useCallback(() => setMutationError(''), []);
+
+  return {
+    viewState,
+    invitationInfo,
+    tokenError,
+    mutationError,
+    successMessage,
+    handleAccept,
+    clearMutationError,
+  };
+}
+
+// ============================================================================
+// SUB-COMPONENT: Validating Spinner
+// ============================================================================
+
+const ValidatingView = React.memo(function ValidatingView() {
+  return (
+    <div style={STYLES.centerLoader} role="status" aria-live="polite">
+      <Spinner />
+      <p style={STYLES.loaderText}>Validating invitation…</p>
+    </div>
+  );
+});
+
+// ============================================================================
+// SUB-COMPONENT: Success Screen
+// ============================================================================
+
+const SuccessView = React.memo(function SuccessView({ message }) {
+  return (
+    <div>
+      <Alert type="success" aria-live="polite">
+        {message}
+      </Alert>
+      <div style={STYLES.signInActionWrapper}>
+        <Link to="/login" className="btn btn-primary btn-full">
+          Sign In to Your Account
+        </Link>
       </div>
-    );
-  }
+    </div>
+  );
+});
+
+// ============================================================================
+// SUB-COMPONENT: Token Error Screen
+// ============================================================================
+
+const TokenErrorView = React.memo(function TokenErrorView({ errorMessage }) {
+  return (
+    <div>
+      <Alert type="error" aria-live="assertive">
+        {errorMessage}
+      </Alert>
+      <p style={STYLES.helpText}>
+        This invitation link may have expired or already been used. Please ask your
+        organization administrator to resend the invitation.
+      </p>
+      <div style={STYLES.signInActionWrapper}>
+        <Link to="/login" style={STYLES.link}>
+          Go to Sign In
+        </Link>
+      </div>
+    </div>
+  );
+});
+
+// ============================================================================
+// SUB-COMPONENT: Invitation Confirmation Form
+// ============================================================================
+
+const AcceptFormView = React.memo(function AcceptFormView({
+  info,
+  isAccepting,
+  mutationError,
+  onAccept,
+  onClearError,
+}) {
+  const userName = info?.user?.name || 'User';
+  const userEmail = info?.user?.email || '';
+  const orgName = info?.organization?.name || 'Organization';
 
   return (
-    <div style={styles.page}>
-      <div style={styles.card}>
-        {/* Brand */}
-        <div style={styles.brand}>
-          <div style={styles.brandLogo}>🎓</div>
-          <h1 style={styles.brandName}>ED-MAX</h1>
-          <p style={styles.brandSub}>
-            {success ? 'Invitation Accepted' : tokenError ? 'Invitation Error' : 'Organization Invitation'}
-          </p>
-        </div>
+    <div>
+      <section style={STYLES.infoBox} aria-label="Invitation Overview">
+        <p style={STYLES.welcomeText}>
+          Welcome back, <strong>{userName}</strong>!
+        </p>
+        <p style={STYLES.subText}>
+          You have been invited to join <strong>{orgName}</strong> on ED-MAX.
+        </p>
+        <p style={STYLES.subText}>
+          Your existing account (<em>{userEmail}</em>) will be connected to this organization — your password stays unchanged.
+        </p>
+      </section>
 
-        {/* ── Success state ── */}
-        {success && (
-          <div>
-            <Alert type="success">{success}</Alert>
-            <div style={{ marginTop: '1.5rem', textAlign: 'center' }}>
-              <Link to="/login" className="btn btn-primary btn-full">
-                Sign In to Your Account
-              </Link>
-            </div>
-          </div>
+      {mutationError && (
+        <Alert type="error" onClose={onClearError} aria-live="assertive">
+          {mutationError}
+        </Alert>
+      )}
+
+      <button
+        id="accept-invitation-btn"
+        type="button"
+        className="btn btn-primary btn-full btn-lg"
+        style={STYLES.submitButton}
+        onClick={onAccept}
+        disabled={isAccepting}
+        aria-busy={isAccepting}
+      >
+        {isAccepting ? (
+          <span style={STYLES.spinnerRow}>
+            <Spinner /> Accepting…
+          </span>
+        ) : (
+          `Accept Invitation & Join ${orgName}`
         )}
+      </button>
 
-        {/* ── Token invalid / expired state ── */}
-        {tokenError && !success && (
-          <div>
-            <Alert type="error">{tokenError}</Alert>
-            <p style={styles.helpText}>
-              This invitation link may have expired or already been used. Please ask your administrator to resend the invitation.
-            </p>
-            <div style={{ marginTop: '1.5rem', textAlign: 'center' }}>
-              <Link to="/login" style={styles.link}>Go to Sign In</Link>
-            </div>
-          </div>
-        )}
-
-        {/* ── Accept invitation form ── */}
-        {info && !success && (
-          <div>
-            <div style={styles.infoBox}>
-              <p style={styles.welcomeText}>
-                Welcome back, <strong>{info.user?.name}</strong>!
-              </p>
-              <p style={styles.subText}>
-                You've been invited to join{' '}
-                <strong>{info.organization?.name}</strong> on ED-MAX.
-              </p>
-              <p style={styles.subText}>
-                Your existing account (<em>{info.user?.email}</em>) will be added to this organization — your password stays the same.
-              </p>
-            </div>
-
-            {error && <Alert type="error" onClose={() => setError('')}>{error}</Alert>}
-
-            <button
-              id="accept-invitation-btn"
-              className="btn btn-primary btn-full btn-lg"
-              style={{ marginTop: '1.5rem' }}
-              onClick={handleAccept}
-              disabled={accepting}
-            >
-              {accepting ? (
-                <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', justifyContent: 'center' }}>
-                  <Spinner /> Accepting…
-                </span>
-              ) : `Accept Invitation & Join ${info.organization?.name || 'Organization'}`}
-            </button>
-
-            <div style={{ marginTop: '1rem', textAlign: 'center' }}>
-              <Link to="/login" style={styles.link}>Go to Sign In instead</Link>
-            </div>
-          </div>
-        )}
+      <div style={STYLES.secondaryActionWrapper}>
+        <Link to="/login" style={STYLES.link}>
+          Go to Sign In instead
+        </Link>
       </div>
+    </div>
+  );
+});
+
+// ============================================================================
+// MAIN VIEW COMPONENT
+// ============================================================================
+
+export default function AcceptInvitation() {
+  const {
+    viewState,
+    invitationInfo,
+    tokenError,
+    mutationError,
+    successMessage,
+    handleAccept,
+    clearMutationError,
+  } = useAcceptInvitationLogic();
+
+  const brandSubtitle = useMemo(() => {
+    switch (viewState) {
+      case VIEW_STATES.SUCCESS:
+        return 'Invitation Accepted';
+      case VIEW_STATES.INVALID_TOKEN:
+        return 'Invitation Error';
+      default:
+        return 'Organization Invitation';
+    }
+  }, [viewState]);
+
+  return (
+    <div style={STYLES.page}>
+      <main style={STYLES.card}>
+        {/* Brand Header */}
+        <header style={STYLES.brand}>
+          <div style={STYLES.brandLogo} aria-hidden="true">
+            🎓
+          </div>
+          <h1 style={STYLES.brandName}>ED-MAX</h1>
+          <p style={STYLES.brandSub}>{brandSubtitle}</p>
+        </header>
+
+        {/* View State Router */}
+        {viewState === VIEW_STATES.VALIDATING && <ValidatingView />}
+
+        {viewState === VIEW_STATES.SUCCESS && (
+          <SuccessView message={successMessage} />
+        )}
+
+        {viewState === VIEW_STATES.INVALID_TOKEN && (
+          <TokenErrorView errorMessage={tokenError} />
+        )}
+
+        {(viewState === VIEW_STATES.READY || viewState === VIEW_STATES.ACCEPTING) && (
+          <AcceptFormView
+            info={invitationInfo}
+            isAccepting={viewState === VIEW_STATES.ACCEPTING}
+            mutationError={mutationError}
+            onAccept={handleAccept}
+            onClearError={clearMutationError}
+          />
+        )}
+      </main>
     </div>
   );
 }
 
-const styles = {
+// ============================================================================
+// STYLES (Performance tokens frozen in memory)
+// ============================================================================
+
+const STYLES = Object.freeze({
   page: {
     minHeight: '100vh',
     background: 'linear-gradient(135deg, #1e1b4b 0%, #4f46e5 100%)',
@@ -185,12 +323,28 @@ const styles = {
     color: 'var(--gray-500)',
     margin: '0.25rem 0 0',
   },
+  centerLoader: {
+    textAlign: 'center',
+    padding: '2rem 0',
+  },
+  loaderText: {
+    marginTop: '1rem',
+    color: 'var(--gray-600)',
+  },
+  signInActionWrapper: {
+    marginTop: '1.5rem',
+    textAlign: 'center',
+  },
+  secondaryActionWrapper: {
+    marginTop: '1rem',
+    textAlign: 'center',
+  },
   infoBox: {
     background: 'var(--gray-50)',
     padding: '1.25rem',
     borderRadius: '0.5rem',
     border: '1px solid var(--gray-200)',
-    marginBottom: '0.25rem',
+    marginBottom: '1rem',
   },
   welcomeText: {
     fontSize: '0.9375rem',
@@ -210,10 +364,19 @@ const styles = {
     lineHeight: 1.5,
     textAlign: 'center',
   },
+  submitButton: {
+    marginTop: '1.5rem',
+  },
+  spinnerRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.5rem',
+    justifyContent: 'center',
+  },
   link: {
     color: 'var(--primary)',
     fontWeight: 600,
     textDecoration: 'none',
     fontSize: '0.875rem',
   },
-};
+});

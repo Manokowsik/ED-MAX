@@ -123,151 +123,153 @@ export default function AccountSettings() {
 
   return (
     <Layout>
-      <div className="account-settings-container" style={{ maxWidth: '860px', margin: '0 auto', paddingBottom: '3rem' }}>
-        {/* PAGE HEADER */}
-        <div style={{ marginBottom: '2rem' }}>
-          <h1 style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--gray-900)', letterSpacing: '-0.02em', marginBottom: '0.35rem' }}>
-            Account Settings
-          </h1>
-          <p style={{ color: 'var(--gray-500)', fontSize: '0.95rem' }}>
-            Manage your personal profile and account settings.
-          </p>
-        </div>
-
-        {pageError && (
-          <div style={{ marginBottom: '1.5rem' }}>
-            <Alert type="error">{pageError}</Alert>
-          </div>
-        )}
-
-        {/* SECTION 1: PROFILE DETAILS */}
-        <div className="card" style={{ marginBottom: '2rem' }}>
-          <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div>
-              <h2 className="card-title" style={{ fontSize: '1.15rem' }}>Personal Profile</h2>
-              <p style={{ color: 'var(--gray-500)', fontSize: '0.85rem', marginTop: '0.2rem' }}>
-                Your public identification across courses and certificates.
-              </p>
-            </div>
-            <Badge variant={isAdmin ? 'primary' : 'success'}>
-              {isAdmin ? '🛡️ Administrator' : '🎓 Student'}
-            </Badge>
-          </div>
-
-          <div className="card-body">
-            {profileSuccess && (
-              <div style={{ marginBottom: '1.25rem' }}>
-                <Alert type="success" onClose={() => setProfileSuccess('')}>{profileSuccess}</Alert>
-              </div>
-            )}
-            {profileError && (
-              <div style={{ marginBottom: '1.25rem' }}>
-                <Alert type="error" onClose={() => setProfileError('')}>{profileError}</Alert>
-              </div>
-            )}
-
-            <form onSubmit={handleSaveProfile} noValidate>
-              <div className="form-group" style={{ marginBottom: '1.25rem' }}>
-                <label className="form-label" htmlFor="profile-fullname">
-                  Full Name <span style={{ color: 'var(--danger)' }}>*</span>
-                </label>
-                <input
-                  id="profile-fullname"
-                  type="text"
-                  className="form-control"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  placeholder="Enter your full name"
-                  required
-                />
-              </div>
-
-              <div className="form-group" style={{ marginBottom: '1.25rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
-                  <label className="form-label" htmlFor="profile-email" style={{ marginBottom: 0 }}>
-                    Email Address
-                  </label>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--gray-500)', background: 'var(--gray-100)', padding: '2px 8px', borderRadius: '4px' }}>
-                    🔒 Verified &amp; Protected
-                  </span>
-                </div>
-                <input
-                  id="profile-email"
-                  type="email"
-                  className="form-control"
-                  value={profile?.email || ''}
-                  disabled
-                  style={{ backgroundColor: 'var(--gray-100)', cursor: 'not-allowed', color: 'var(--gray-600)' }}
-                />
-                <span style={{ fontSize: '0.75rem', color: 'var(--gray-500)', display: 'block', marginTop: '0.35rem' }}>
-                  Email changes require secure identity verification by an administrator.
-                </span>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
-                <div style={{ background: 'var(--gray-50)', padding: '0.85rem 1rem', borderRadius: '8px', border: '1px solid var(--gray-200)' }}>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--gray-500)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Account Role</span>
-                  <div style={{ fontWeight: 600, color: 'var(--gray-800)', marginTop: '0.2rem' }}>
-                    {profile?.role === 'ADMIN' ? 'Administrator' : 'Learner / Student'}
-                  </div>
-                </div>
-
-                <div style={{ background: 'var(--gray-50)', padding: '0.85rem 1rem', borderRadius: '8px', border: '1px solid var(--gray-200)' }}>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--gray-500)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Account Status</span>
-                  <div style={{ fontWeight: 600, color: 'var(--success)', marginTop: '0.2rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: 'var(--success)', display: 'inline-block' }} />
-                    Active &amp; Verified
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  disabled={savingProfile}
-                  id="save-profile-btn"
-                >
-                  {savingProfile ? <Spinner size="sm" /> : 'Save Changes'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-
-        {/* SECTION 2: DANGER ZONE / ACCOUNT DELETION */}
-        <div className="card" style={{ border: '1px solid #fca5a5', backgroundColor: '#fff5f5' }}>
-          <div className="card-header" style={{ borderBottom: '1px solid #fecaca', backgroundColor: 'transparent' }}>
-            <h2 className="card-title" style={{ fontSize: '1.15rem', color: 'var(--danger)' }}>
-              ⚠️ Danger Zone
-            </h2>
-            <p style={{ color: 'var(--danger-text)', fontSize: '0.85rem', marginTop: '0.2rem' }}>
-              Actions here have irreversible effects on your account access.
+      <div className="page-container">
+        <div className="account-settings-container">
+          {/* PAGE HEADER */}
+          <div style={{ marginBottom: '1.75rem' }}>
+            <h1 style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--gray-900)', letterSpacing: '-0.02em', marginBottom: '0.35rem' }}>
+              Account Settings
+            </h1>
+            <p style={{ color: 'var(--gray-500)', fontSize: '0.95rem' }}>
+              Manage your personal profile and account settings.
             </p>
           </div>
 
-          <div className="card-body" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-            <div>
-              <div style={{ fontWeight: 700, color: 'var(--gray-900)' }}>Deactivate Account</div>
-              <p style={{ color: 'var(--gray-600)', fontSize: '0.85rem', maxWidth: '520px', marginTop: '0.25rem' }}>
-                Deactivating your account will terminate your active sessions and prevent future sign-ins.
-                Historical course enrollments, quiz records, and issued certificates remain preserved for organizational reporting and audit purposes.
+          {pageError && (
+            <div style={{ marginBottom: '1.5rem' }}>
+              <Alert type="error">{pageError}</Alert>
+            </div>
+          )}
+
+          {/* SECTION 1: PROFILE DETAILS */}
+          <div className="card" style={{ marginBottom: '2rem' }}>
+            <div className="account-card-header">
+              <div>
+                <h2 className="card-title" style={{ fontSize: '1.15rem' }}>Personal Profile</h2>
+                <p style={{ color: 'var(--gray-500)', fontSize: '0.85rem', marginTop: '0.2rem' }}>
+                  Your public identification across courses and certificates.
+                </p>
+              </div>
+              <Badge variant={isAdmin ? 'primary' : 'success'}>
+                {isAdmin ? '🛡️ Administrator' : '🎓 Student'}
+              </Badge>
+            </div>
+
+            <div className="card-body">
+              {profileSuccess && (
+                <div style={{ marginBottom: '1.25rem' }}>
+                  <Alert type="success" onClose={() => setProfileSuccess('')}>{profileSuccess}</Alert>
+                </div>
+              )}
+              {profileError && (
+                <div style={{ marginBottom: '1.25rem' }}>
+                  <Alert type="error" onClose={() => setProfileError('')}>{profileError}</Alert>
+                </div>
+              )}
+
+              <form onSubmit={handleSaveProfile} noValidate>
+                <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                  <label className="form-label" htmlFor="profile-fullname">
+                    Full Name <span style={{ color: 'var(--danger)' }}>*</span>
+                  </label>
+                  <input
+                    id="profile-fullname"
+                    type="text"
+                    className="form-input"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    placeholder="Enter your full name"
+                    required
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                  <div className="account-email-label-row">
+                    <label className="form-label" htmlFor="profile-email" style={{ marginBottom: 0 }}>
+                      Email Address
+                    </label>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--gray-500)', background: 'var(--gray-100)', padding: '2px 8px', borderRadius: '4px' }}>
+                      🔒 Verified &amp; Protected
+                    </span>
+                  </div>
+                  <input
+                    id="profile-email"
+                    type="email"
+                    className="form-input"
+                    value={profile?.email || ''}
+                    disabled
+                    style={{ backgroundColor: 'var(--gray-100)', cursor: 'not-allowed', color: 'var(--gray-600)' }}
+                  />
+                  <span style={{ fontSize: '0.75rem', color: 'var(--gray-500)', display: 'block', marginTop: '0.35rem' }}>
+                    Email changes require secure identity verification by an administrator.
+                  </span>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+                  <div style={{ background: 'var(--gray-50)', padding: '0.85rem 1rem', borderRadius: '8px', border: '1px solid var(--gray-200)' }}>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--gray-500)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Account Role</span>
+                    <div style={{ fontWeight: 600, color: 'var(--gray-800)', marginTop: '0.2rem' }}>
+                      {profile?.role === 'ADMIN' ? 'Administrator' : 'Learner / Student'}
+                    </div>
+                  </div>
+
+                  <div style={{ background: 'var(--gray-50)', padding: '0.85rem 1rem', borderRadius: '8px', border: '1px solid var(--gray-200)' }}>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--gray-500)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Account Status</span>
+                    <div style={{ fontWeight: 600, color: 'var(--success)', marginTop: '0.2rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: 'var(--success)', display: 'inline-block' }} />
+                      Active &amp; Verified
+                    </div>
+                  </div>
+                </div>
+
+                <div className="account-profile-actions">
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={savingProfile}
+                    id="save-profile-btn"
+                  >
+                    {savingProfile ? <Spinner size="sm" /> : 'Save Changes'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          {/* SECTION 2: DANGER ZONE / ACCOUNT DELETION */}
+          <div className="card" style={{ border: '1px solid #fca5a5', backgroundColor: '#fff5f5' }}>
+            <div className="card-header" style={{ borderBottom: '1px solid #fecaca', backgroundColor: 'transparent' }}>
+              <h2 className="card-title" style={{ fontSize: '1.15rem', color: 'var(--danger)' }}>
+                ⚠️ Danger Zone
+              </h2>
+              <p style={{ color: 'var(--danger-text)', fontSize: '0.85rem', marginTop: '0.2rem' }}>
+                Actions here have irreversible effects on your account access.
               </p>
             </div>
 
-            <button
-              type="button"
-              className="btn btn-danger"
-              onClick={() => {
-                setShowDeleteModal(true);
-                setDeleteConfirmText('');
-                setDeletePassword('');
-                setDeleteError('');
-              }}
-              id="open-delete-modal-btn"
-            >
-              Deactivate Account
-            </button>
+            <div className="card-body" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+              <div>
+                <div style={{ fontWeight: 700, color: 'var(--gray-900)' }}>Deactivate Account</div>
+                <p style={{ color: 'var(--gray-600)', fontSize: '0.85rem', maxWidth: '520px', marginTop: '0.25rem' }}>
+                  Deactivating your account will terminate your active sessions and prevent future sign-ins.
+                  Historical course enrollments, quiz records, and issued certificates remain preserved for organizational reporting and audit purposes.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={() => {
+                  setShowDeleteModal(true);
+                  setDeleteConfirmText('');
+                  setDeletePassword('');
+                  setDeleteError('');
+                }}
+                id="open-delete-modal-btn"
+              >
+                Deactivate Account
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -324,7 +326,7 @@ export default function AccountSettings() {
               <input
                 id="delete-confirm-input"
                 type="text"
-                className="form-control"
+                className="form-input"
                 value={deleteConfirmText}
                 onChange={(e) => setDeleteConfirmText(e.target.value)}
                 placeholder="Type DELETE"
@@ -339,7 +341,7 @@ export default function AccountSettings() {
               <input
                 id="delete-password-input"
                 type="password"
-                className="form-control"
+                className="form-input"
                 value={deletePassword}
                 onChange={(e) => setDeletePassword(e.target.value)}
                 placeholder="••••••••••••"

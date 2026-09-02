@@ -4563,4 +4563,56 @@ tbody tr:hover {
   }
 }
 
+/* ============================================================
+   Account Settings Layout & Responsive Optimizations
+   ============================================================ */
+
+.account-settings-container {
+  max-width: 860px;
+  margin: 0 auto;
+  padding-bottom: 3rem;
+}
+
+.account-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.account-email-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.35rem;
+}
+
+.account-profile-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 1.5rem;
+}
+
+@media (max-width: 640px) {
+  .account-card-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 1rem 1.25rem;
+  }
+
+  .account-profile-actions {
+    width: 100%;
+  }
+
+  .account-profile-actions .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
 

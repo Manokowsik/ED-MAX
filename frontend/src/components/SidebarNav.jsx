@@ -66,19 +66,7 @@ export default function SidebarNav() {
         { to: '/student/settings', label: 'Settings', icon: COURSE_ICONS.student.settings },
       ];
 
-  const bottomTabs = isAdmin
-    ? [
-        { to: '/admin/dashboard', label: 'Admin', icon: '📊' },
-        { to: '/admin/courses', label: 'Courses', icon: '📖' },
-        { to: '/admin/students', label: 'Users', icon: '👥' },
-        { to: '/admin/settings', label: 'Settings', icon: '⚙️' },
-      ]
-    : [
-        { to: '/student/dashboard', label: 'Dashboard', icon: '🏠' },
-        { to: '/student/courses', label: 'Courses', icon: '📚' },
-        { to: '/student/certificates', label: 'Awards', icon: '🎓' },
-        { to: '/student/settings', label: 'Settings', icon: '⚙️' },
-      ];
+
 
   const initials = user?.name
     ? user.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
@@ -98,23 +86,27 @@ export default function SidebarNav() {
 
   return (
     <>
-      {/* === MOBILE TOP BAR === */}
+      {/* === MOBILE TOP BAR (Mobile Only) === */}
       <div className="sv2-mobile-topbar">
-        <button
-          className="sv2-hamburger"
-          onClick={() => setSidebarOpen(true)}
-          aria-label="Open navigation menu"
-          id="sidebar-hamburger-btn"
+        {/* Profile Avatar — LEFT TOP */}
+        <div
+          className="sv2-user-avatar"
+          style={{ width: 34, height: 34, fontSize: '0.78rem', cursor: 'pointer', flexShrink: 0 }}
+          onClick={() => navigate(isAdmin ? '/admin/settings' : '/student/settings')}
+          title={user?.name ?? 'Account Settings'}
+          id="mobile-profile-avatar-btn"
         >
-          ☰
-        </button>
-        
+          {initials}
+        </div>
+
+        {/* Brand Logo — CENTER */}
         <div className="sv2-mobile-brand" onClick={() => navigate(homePath)} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
           <span style={{ fontSize: '1.1rem' }}>⚡</span>
           <span className="sv2-mobile-logo">ED-MAX</span>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        {/* Right Actions — Notifications & Hamburger Menu — RIGHT TOP */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {/* Notification bell icon */}
           <button
             type="button"
@@ -145,15 +137,15 @@ export default function SidebarNav() {
             )}
           </button>
 
-          {/* Mobile profile avatar */}
-          <div
-            className="sv2-user-avatar"
-            style={{ width: 32, height: 32, fontSize: '0.75rem', cursor: 'pointer' }}
-            onClick={() => navigate(isAdmin ? '/admin/settings' : '/student/settings')}
-            title={user?.name ?? 'Account Settings'}
+          {/* Hamburger Menu — RIGHT TOP */}
+          <button
+            className="sv2-hamburger"
+            onClick={() => setSidebarOpen(true)}
+            aria-label="Open navigation menu"
+            id="sidebar-hamburger-btn"
           >
-            {initials}
-          </div>
+            ☰
+          </button>
         </div>
       </div>
 
@@ -314,24 +306,7 @@ export default function SidebarNav() {
         </div>
       </aside>
 
-      {/* === BOTTOM NAVIGATION TAB BAR (Mobile Only) === */}
-      <div className="sv2-bottom-tabs" id="bottom-tab-bar">
-        <div className="sv2-bottom-tabs-inner">
-          {bottomTabs.map((tab) => (
-            <NavLink
-              key={tab.to}
-              to={tab.to}
-              className={({ isActive }) =>
-                `sv2-tab-item${isActive ? ' active' : ''}`
-              }
-              id={`bottom-tab-${tab.label.toLowerCase()}`}
-            >
-              <span className="sv2-tab-icon">{tab.icon}</span>
-              {tab.label}
-            </NavLink>
-          ))}
-        </div>
-      </div>
+
 
       {/* === VERIFY CREDENTIAL MODAL (admin only) === */}
       {isAdmin && (

@@ -3691,12 +3691,11 @@ tbody tr:hover {
   }
 
   .sv2-bottom-tabs {
-    display: flex;
-    flex-direction: column;
+    display: none !important;
   }
 
   .sidebar-main-inner {
-    padding: 1.25rem 1rem 5.5rem;
+    padding: 1.25rem 1rem 2rem;
     width: 100%;
     max-width: 100%;
     box-sizing: border-box;

@@ -137,7 +137,16 @@ async function apiRequest(endpoint, options = {}) {
   if (!response.ok) {
     const message = data.detail || data.message || "Something went wrong";
 
-    if (response.status === 401 && !options.__retryAfterRefresh && endpoint !== "/auth/refresh") {
+    const isPublicAuthEndpoint =
+      endpoint.startsWith("/auth/login") ||
+      endpoint.startsWith("/auth/signup") ||
+      endpoint.startsWith("/auth/verify-email") ||
+      endpoint.startsWith("/auth/resend-otp") ||
+      endpoint.startsWith("/auth/forgot-password") ||
+      endpoint.startsWith("/auth/reset-password") ||
+      endpoint === "/auth/refresh";
+
+    if (response.status === 401 && !options.__retryAfterRefresh && !isPublicAuthEndpoint) {
       try {
         await refreshSession();
         return apiRequest(endpoint, { ...options, __retryAfterRefresh: true });

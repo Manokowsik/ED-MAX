@@ -4,6 +4,8 @@ import AdminLayout from '../../layouts/AdminLayout';
 import {
   getCourses,
   createCourse,
+  createModule,
+  createTrainingContent,
   activateCourse,
   deactivateCourse,
   getStudents,
@@ -11,6 +13,7 @@ import {
   unassignCourse,
   getStudentAssignedCourses,
 } from '../../services/api';
+import ModuleWizardModal from '../../components/lms/ModuleWizardModal';
 import {
   LoadingPage,
   Alert,
@@ -19,6 +22,7 @@ import {
   ConfirmModal,
   Spinner,
 } from '../../components/ui';
+
 
 // ============================================================================
 // CONSTANTS & CONFIGURATION
@@ -94,9 +98,11 @@ const CourseCard = React.memo(function CourseCard({
   index,
   onQuickAssign,
   onToggleStatus,
+  onAddModuleWizard,
 }) {
   const thumb = THUMB_GRADIENTS[index % THUMB_GRADIENTS.length];
   const category = CATEGORIES[index % CATEGORIES.length];
+  const isCourseEmpty = (course.module_count ?? course.modules_count ?? course.total_modules ?? 0) === 0;
 
   return (
     <article className="sm-course-card-v2" id={`course-card-${course.id}`}>
@@ -116,9 +122,16 @@ const CourseCard = React.memo(function CourseCard({
             {thumb.icon}
           </span>
         </div>
-        <span className={`sm-course-status-badge ${course.is_active ? 'published' : 'inactive'}`}>
-          {course.is_active ? 'Published' : 'Inactive'}
-        </span>
+        <div style={{ position: 'absolute', top: 10, right: 10, display: 'flex', gap: 6, alignItems: 'center' }}>
+          {isCourseEmpty && (
+            <span className="empty-course-badge">
+              ⚠️ Empty (0 Modules)
+            </span>
+          )}
+          <span className={`sm-course-status-badge ${course.is_active ? 'published' : 'inactive'}`}>
+            {course.is_active ? 'Published' : 'Inactive'}
+          </span>
+        </div>
       </div>
 
       <div className="sm-course-body">
@@ -130,8 +143,10 @@ const CourseCard = React.memo(function CourseCard({
         >
           {course.title}
         </Link>
-        {course.description && (
+        {course.description ? (
           <div className="sm-course-desc">{course.description}</div>
+        ) : (
+          <div className="sm-course-desc text-gray italic">No course description</div>
         )}
 
         <div className="sm-course-meta-row">
@@ -139,6 +154,17 @@ const CourseCard = React.memo(function CourseCard({
             👥 {course.enrolled_count ?? course.enrolled_students ?? 0} Enrolled
           </div>
           <div className="sm-course-actions">
+            {isCourseEmpty && onAddModuleWizard && (
+              <button
+                type="button"
+                className="btn btn-xs btn-primary"
+                title="Quick Add Module"
+                onClick={() => onAddModuleWizard(course)}
+                style={{ fontSize: '0.7rem', padding: '2px 8px' }}
+              >
+                + Add Module
+              </button>
+            )}
             {course.is_active && (
               <button
                 type="button"
@@ -192,7 +218,7 @@ const CourseCard = React.memo(function CourseCard({
 });
 
 // ============================================================================
-// SUB-COMPONENT: Create Course Modal
+// SUB-COMPONENT: Create Course Modal (Simple 1-step)
 // ============================================================================
 
 const CreateCourseModal = React.memo(function CreateCourseModal({
@@ -292,6 +318,8 @@ const CreateCourseModal = React.memo(function CreateCourseModal({
     </Modal>
   );
 });
+
+
 
 // ============================================================================
 // SUB-COMPONENT: Quick Assign Modal
@@ -409,6 +437,7 @@ export default function AdminCourses() {
 
   // Modals & Action States
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [wizardCourseForModule, setWizardCourseForModule] = useState(null);
   const [quickAssignCourse, setQuickAssignCourse] = useState(null);
   const [statusConfirm, setStatusConfirm] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
@@ -769,6 +798,7 @@ export default function AdminCourses() {
                   course={c}
                   index={i}
                   onQuickAssign={setQuickAssignCourse}
+                  onAddModuleWizard={(course) => setWizardCourseForModule(course)}
                   onToggleStatus={(course) =>
                     setStatusConfirm({
                       course,
@@ -978,6 +1008,19 @@ export default function AdminCourses() {
         onClose={() => setIsCreateOpen(false)}
         onSubmit={handleCreateCourse}
       />
+
+      {wizardCourseForModule && (
+        <ModuleWizardModal
+          isOpen={Boolean(wizardCourseForModule)}
+          courseId={wizardCourseForModule.id}
+          defaultOrder={1}
+          onClose={() => setWizardCourseForModule(null)}
+          onCreated={(newMod) => {
+            setNotification({ type: 'success', text: `Module "${newMod?.title || ''}" created successfully!` });
+            loadData();
+          }}
+        />
+      )}
 
       <QuickAssignModal
         course={quickAssignCourse}

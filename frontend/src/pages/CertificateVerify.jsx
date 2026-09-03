@@ -20,7 +20,8 @@ function formatDate(iso) {
 export default function CertificateVerify() {
   const { certNumber } = useParams();
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(true);
+  const [inputCode, setInputCode] = useState(certNumber || '');
+  const [loading, setLoading] = useState(Boolean(certNumber));
   const [cert, setCert] = useState(null);
   const [notFound, setNotFound] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -30,7 +31,7 @@ export default function CertificateVerify() {
       navigate(-1);
       return;
     }
-    navigate('/student/certificates');
+    navigate('/');
   }
 
   function handleShare() {
@@ -49,26 +50,43 @@ export default function CertificateVerify() {
   }
 
   useEffect(() => {
-    if (!certNumber) return;
+    if (!certNumber) {
+      setLoading(false);
+      setCert(null);
+      setNotFound(false);
+      return;
+    }
+    setInputCode(certNumber);
     setLoading(true);
+    setNotFound(false);
     verifyCertificate(certNumber)
       .then((res) => {
         if (res.valid && res.certificate) {
           setCert(res.certificate);
         } else {
+          setCert(null);
           setNotFound(true);
         }
       })
-      .catch(() => setNotFound(true))
+      .catch(() => {
+        setCert(null);
+        setNotFound(true);
+      })
       .finally(() => setLoading(false));
   }, [certNumber]);
+
+  function handleSearchSubmit(e) {
+    e.preventDefault();
+    if (!inputCode.trim()) return;
+    navigate(`/verify/${encodeURIComponent(inputCode.trim().toUpperCase())}`);
+  }
 
   // ── Shared page shell ────────────────────────────────────────
   const shell = (content) => (
     <div style={styles.page}>
       {/* Top bar */}
       <div style={styles.topBar}>
-        <div style={styles.logo}>ED-MAX</div>
+        <div style={styles.logo} onClick={() => navigate('/')} style={{ cursor: 'pointer', ...styles.logo }}>ED-MAX</div>
         <button type="button" onClick={handleBack} style={styles.backLink}>
           ← Back
         </button>
@@ -85,6 +103,40 @@ export default function CertificateVerify() {
     </div>
   );
 
+  // ── Search Form Component ───────────────────────────────────
+  const renderSearchForm = () => (
+    <div style={styles.card}>
+      <div style={{ fontSize: '3rem', marginBottom: 'var(--space-2)' }}>🎓</div>
+      <h1 style={{ fontSize: 'var(--font-size-2xl)', fontWeight: 800, color: '#1e293b', marginBottom: 'var(--space-2)' }}>
+        Verify Credential & Certificate
+      </h1>
+      <p style={{ color: 'var(--gray-500)', fontSize: 'var(--font-size-sm)', marginBottom: 'var(--space-6)', maxWidth: 500, margin: '0 auto var(--space-6)' }}>
+        Enter an official Certificate Number or ID below to verify student completion records and authentic credentials.
+      </p>
+
+      <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: '0.75rem', maxWidth: 520, margin: '0 auto', flexWrap: 'wrap', justifyContent: 'center' }}>
+        <input
+          type="text"
+          className="form-input"
+          placeholder="Enter Certificate No (e.g. CERT-1-2-ABC12345)"
+          value={inputCode}
+          onChange={(e) => setInputCode(e.target.value)}
+          style={{ flex: 1, minWidth: 260, padding: '0.75rem 1rem', fontSize: '0.95rem', borderRadius: 'var(--radius-lg)' }}
+          id="verify-cert-input"
+          autoFocus
+        />
+        <button type="submit" className="btn btn-primary btn-lg" style={{ padding: '0.75rem 1.5rem', fontWeight: 700 }} id="verify-cert-submit-btn">
+          Verify Certificate
+        </button>
+      </form>
+    </div>
+  );
+
+  // ── No cert parameter provided (Root /verify) ───────────────
+  if (!certNumber) {
+    return shell(renderSearchForm());
+  }
+
   // ── Loading ──────────────────────────────────────────────────
   if (loading) {
     return shell(
@@ -92,7 +144,7 @@ export default function CertificateVerify() {
         <div style={{ textAlign: 'center', padding: 'var(--space-12)' }}>
           <div className="spinner spinner-lg" aria-label="Verifying…" />
           <p style={{ marginTop: 'var(--space-4)', color: 'var(--gray-500)' }}>
-            Verifying certificate…
+            Verifying certificate #{certNumber}…
           </p>
         </div>
       </div>
@@ -102,22 +154,25 @@ export default function CertificateVerify() {
   // ── Not found / Invalid ──────────────────────────────────────
   if (notFound || !cert) {
     return shell(
-      <div style={{ ...styles.card, ...styles.invalidCard }}>
-        <div style={{ fontSize: '3rem', marginBottom: 'var(--space-4)' }}>❌</div>
-        <h1 style={{ ...styles.status, color: 'var(--danger-text)' }}>
-          Certificate Not Found
-        </h1>
-        <p style={{ color: 'var(--danger-text)', marginBottom: 'var(--space-4)', fontSize: 'var(--font-size-sm)' }}>
-          The certificate number{' '}
-          <code style={{ fontFamily: 'monospace', background: '#fee2e2', padding: '2px 6px', borderRadius: 4 }}>
-            {certNumber}
-          </code>{' '}
-          does not match any record in our system.
-        </p>
-        <p style={{ color: 'var(--gray-500)', fontSize: 'var(--font-size-xs)' }}>
-          If you believe this is an error, please contact the training administrator.
-        </p>
-      </div>
+      <>
+        <div style={{ ...styles.card, ...styles.invalidCard }}>
+          <div style={{ fontSize: '3rem', marginBottom: 'var(--space-4)' }}>❌</div>
+          <h1 style={{ ...styles.status, color: 'var(--danger-text)' }}>
+            Certificate Not Found
+          </h1>
+          <p style={{ color: 'var(--danger-text)', marginBottom: 'var(--space-4)', fontSize: 'var(--font-size-sm)' }}>
+            The certificate number{' '}
+            <code style={{ fontFamily: 'monospace', background: '#fee2e2', padding: '2px 6px', borderRadius: 4 }}>
+              {certNumber}
+            </code>{' '}
+            does not match any record in our system.
+          </p>
+          <p style={{ color: 'var(--gray-500)', fontSize: 'var(--font-size-xs)' }}>
+            Please check for typos or enter another certificate number below.
+          </p>
+        </div>
+        {renderSearchForm()}
+      </>
     );
   }
 

@@ -2653,26 +2653,35 @@ tbody tr:hover {
 
 /* ------ Sidebar User Block ------ */
 .sv2-user-block {
-  padding: 1rem 1.25rem;
+  padding: 0.5rem 0.75rem;
+  margin: 0.5rem 0.75rem 0.25rem;
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  border-bottom: 1px solid #f1f5f9;
+  gap: 0.5rem;
+  background: #f8fafc;
+  border: 1px solid #f1f5f9;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.sv2-user-block:hover {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
 }
 
 .sv2-user-avatar {
-  width: 40px;
-  height: 40px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
   color: #fff;
-  font-size: 0.9rem;
+  font-size: 0.72rem;
   font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(59,130,246,0.25);
+  box-shadow: 0 1px 4px rgba(59,130,246,0.2);
 }
 
 .sv2-user-info {
@@ -2681,29 +2690,30 @@ tbody tr:hover {
 }
 
 .sv2-user-name {
-  font-size: 0.875rem;
-  font-weight: 700;
+  font-size: 0.78rem;
+  font-weight: 600;
   color: #0f172a;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: 1.2;
 }
 
 .sv2-user-role {
-  font-size: 0.7rem;
-  font-weight: 600;
+  font-size: 0.65rem;
+  font-weight: 500;
   color: #64748b;
   margin-top: 1px;
 }
 
 .sv2-online-dot {
   display: inline-block;
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   background: #22c55e;
   border-radius: 50%;
-  margin-right: 4px;
-  box-shadow: 0 0 0 2px rgba(34,197,94,0.2);
+  margin-right: 3px;
+  box-shadow: 0 0 0 2px rgba(34,197,94,0.15);
 }
 
 /* ------ Sidebar Navigation ------ */
@@ -4964,5 +4974,127 @@ body:has(.signup-page) {
     overflow-y: auto;
   }
 }
+
+/* ============================================================
+   Module & Course Creation Wizard Styles
+   ============================================================ */
+
+.wizard-step-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 2px solid var(--gray-200);
+  padding-bottom: 0.75rem;
+  margin-bottom: 1.25rem;
+  gap: 0.5rem;
+}
+
+.wizard-step-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.wizard-step-item.active {
+  opacity: 1;
+  font-weight: 700;
+}
+
+.wizard-step-item.completed {
+  opacity: 0.9;
+  color: var(--success);
+}
+
+.wizard-step-badge {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--gray-200);
+  color: var(--gray-700);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.wizard-step-item.active .wizard-step-badge {
+  background: var(--primary);
+  color: #ffffff;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.2);
+}
+
+.wizard-step-item.completed .wizard-step-badge {
+  background: var(--success-light);
+  color: var(--success);
+  border: 1px solid #a7f3d0;
+}
+
+.wizard-step-label {
+  font-size: 0.825rem;
+  color: var(--gray-700);
+}
+
+.wizard-slide-content {
+  min-height: 320px;
+}
+
+.wizard-slide-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--gray-900);
+  margin-bottom: 0.25rem;
+}
+
+.wizard-slides-tabs {
+  display: flex;
+  gap: 0.4rem;
+  overflow-x: auto;
+  padding-bottom: 0.4rem;
+}
+
+.wizard-slide-tab {
+  padding: 0.35rem 0.75rem;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border: 1px solid var(--gray-200);
+  background: var(--gray-50);
+  color: var(--gray-700);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.wizard-slide-tab.active {
+  background: var(--primary);
+  color: #ffffff;
+  border-color: var(--primary);
+}
+
+.wizard-slide-card {
+  background: #ffffff;
+  border: 1px solid var(--gray-200);
+  border-radius: 12px;
+  padding: 1rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+}
+
+.empty-course-badge {
+  background: #fff7ed;
+  color: #c2410c;
+  border: 1px solid #ffedd5;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 
 

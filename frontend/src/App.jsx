@@ -266,6 +266,8 @@ function AppRoutes() {
       />
 
       {/* Public — no auth required */}
+      <Route path="/verify" element={<CertificateVerify />} />
+      <Route path="/verify-certificate" element={<CertificateVerify />} />
       <Route path="/verify/:certNumber" element={<CertificateVerify />} />
 
       {/* 404 */}

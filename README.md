@@ -1,216 +1,209 @@
-# ED-MAX Full-Stack Training & Certification Platform
+ED-MAX Training & Certification Platform
 
-A modern, multi-tenant learning management system (LMS) designed for enterprise organizations, course authoring, interactive student learning, server-validated quizzes, progress persistence, and verified certificate issuance.
+A learning platform built for organizations that want to train people, test what they've learned, and issue certificates once they pass. Instructors create courses and quizzes; students work through the material, take quizzes, and earn certificates when they finish.
 
----
+🚀 What It Does
+Separate Organizations: Each organization's courses, students, and data stay separate from everyone else's.
+One Instructor/Admin Role: A single ADMIN role that can manage members, create courses, write lesson content, and build quizzes — no need to juggle multiple staff roles.
+Clear Learning Path: Students go through Module Content → take a Quiz → get a score calculated by the server → need 70% or higher to pass → module and course progress update automatically.
+Certificate Downloads: Once a student finishes a course, they can download a real PDF certificate with their name, score, completion date, and a certificate number they can use to verify it.
+Basic Security:
+Students and admins have different permissions (ADMIN vs STUDENT).
+Every API request checks that users can only see their own organization's data.
+Quiz answers are graded on the server, so students can't see correct answers in the app's data before submitting.
+Easy Database Setup: One Alembic migration file sets up the whole database from scratch.
+Sample Data Included: A single command loads demo courses, quizzes, and test login accounts so you can try the platform right away.
+🛠️ Built With
+Layer	Technology	Purpose
+Backend API	FastAPI (Python 3.10+)	Handles requests, auth, and business logic
+Database	PostgreSQL	Stores courses, users, quizzes, progress, certificates
+Database Driver	psycopg (v3)	Talks to PostgreSQL
+Migrations	Alembic	Sets up and updates the database schema
+Frontend	React 19 + Vite	The web app students and instructors use
+Styling	Custom CSS	Clean, responsive design
+PDF Generation	html2pdf.js / jspdf	Generates the certificate PDF
+Frontend Tests	Vitest + React Testing Library	Tests the UI
+Backend Tests	Pytest + HTTPX TestClient	Tests the API
+📐 How the Data Fits Together
+has members
+owns
+enrolled in
+has students
+contains
+contains
+has quiz
+contains
+contains
+tracks
+tracked in
+submits
+recorded for
+earns
+issued for
+ORGANIZATIONS
+USERS
+int
+id
+PK
+string
+email
+UK
+string
+role
+ADMIN | STUDENT
+int
+organization_id
+FK
+boolean
+is_active
+COURSES
+int
+id
+PK
+string
+title
+int
+organization_id
+FK
+boolean
+is_active
+ENROLLMENTS
+COURSE_MODULES
+int
+id
+PK
+int
+course_id
+FK
+string
+title
+boolean
+is_published
+TRAINING_CONTENTS
+QUIZZES
+int
+id
+PK
+int
+module_id
+FK
+int
+passing_score
+QUIZ_QUESTIONS
+QUIZ_OPTIONS
+MODULE_PROGRESS
+QUIZ_ATTEMPTS
+CERTIFICATES
+int
+id
+PK
+string
+certificate_number
+UK
+int
+student_id
+FK
+int
+course_id
+FK
+int
+final_score
+🔑 Why Only Two Roles?
+ADMIN: Runs the organization's account and also writes the courses, modules, and quizzes — basically the instructor.
+STUDENT: Takes the courses assigned to them.
 
-## 🚀 Key Features
+We kept it to two roles on purpose — in most training setups, the same person who manages the account is also the one writing the training material. Adding a separate "instructor" role would just mean more roles to manage without giving students or admins anything extra.
 
-- **Multi-Tenant Architecture**: Complete data isolation across distinct enterprise organizations.
-- **Admin / Instructor Authoring**: Single unified `ADMIN` role for managing organization members, authoring courses, published/draft module content, and quiz creation.
-- **Enforced Learning Progression**:
-  - **Module Content** → **Quiz Attempt** → **Server-Side Scoring** → **Passing Threshold (≥ 70%)** → **Module Progress & Course Completion**.
-- **Real PDF Certificate Download**: Instant client-side PDF document generation for completed courses with unique certificate numbers and QR/URL validation.
-- **Security & Authorization**:
-  - Role-Based Access Control (`ADMIN` vs `STUDENT`).
-  - IDOR & Org isolation guards on every API route.
-  - Server-calculated quiz scores with zero leakage of correct answer flags in client payloads.
-- **Reproducible Database Migrations**: Alembic base migration `000_base_schema.py` enabling complete zero-to-hero database creation from a fresh PostgreSQL instance.
-- **Development Seed Data**: One-command CLI seed script creating published demo courses, modules, text/video content, quizzes, and pre-configured test credentials.
+⚡ Getting It Running Locally
+1. What You'll Need
+Python 3.10+
+Node.js 18+ & npm
+PostgreSQL 14+ running locally
+2. Set Up Your Environment
 
----
+Copy the example environment file:
 
-## 🛠️ Technology Stack
-
-| Layer | Technology | Purpose |
-| :--- | :--- | :--- |
-| **Backend API** | FastAPI (Python 3.14+) | Async REST API, OpenAPI docs, security dependencies |
-| **Database** | PostgreSQL | Relational storage with foreign keys, cascades, & indexes |
-| **Database Driver** | `psycopg` (v3) | High-performance parameterized SQL execution |
-| **Migrations** | Alembic | Version-controlled schema migrations (`alembic upgrade head`) |
-| **Frontend UI** | React 19 + Vite | Dynamic SPA with responsive modern design system |
-| **Styling** | Custom Vanilla CSS | HSL variables, glassmorphism, responsive grid/flexbox |
-| **PDF Generation** | `html2pdf.js` / `jspdf` | High-fidelity landscape PDF certificate export |
-| **Frontend Tests** | Vitest + React Testing Library | Component unit testing and assertions |
-| **Backend Tests** | Pytest + HTTPX TestClient | End-to-end API integration test coverage |
-
----
-
-## 📐 System Architecture & ER Diagram
-
-```mermaid
-erDiagram
-    ORGANIZATIONS ||--o{ USERS : "has members"
-    ORGANIZATIONS ||--o{ COURSES : "owns"
-    USERS ||--o{ ENROLLMENTS : "enrolled in"
-    COURSES ||--o{ ENROLLMENTS : "has students"
-    COURSES ||--o{ COURSE_MODULES : "contains"
-    COURSE_MODULES ||--o{ TRAINING_CONTENTS : "contains"
-    COURSE_MODULES ||--o{ QUIZZES : "has quiz"
-    QUIZZES ||--o{ QUIZ_QUESTIONS : "contains"
-    QUIZ_QUESTIONS ||--o{ QUIZ_OPTIONS : "contains"
-    USERS ||--o{ MODULE_PROGRESS : "tracks"
-    COURSE_MODULES ||--o{ MODULE_PROGRESS : "tracked in"
-    USERS ||--o{ QUIZ_ATTEMPTS : "submits"
-    QUIZZES ||--o{ QUIZ_ATTEMPTS : "recorded for"
-    USERS ||--o{ CERTIFICATES : "earns"
-    COURSES ||--o{ CERTIFICATES : "issued for"
-
-    USERS {
-        int id PK
-        string email UK
-        string role "ADMIN | STUDENT"
-        int organization_id FK
-        boolean is_active
-    }
-
-    COURSES {
-        int id PK
-        string title
-        int organization_id FK
-        boolean is_active
-    }
-
-    COURSE_MODULES {
-        int id PK
-        int course_id FK
-        string title
-        boolean is_published
-    }
-
-    QUIZZES {
-        int id PK
-        int module_id FK
-        int passing_score
-    }
-
-    CERTIFICATES {
-        int id PK
-        string certificate_number UK
-        int student_id FK
-        int course_id FK
-        int final_score
-    }
-```
-
----
-
-## 🔑 Role & Authorization Design Decision
-
-The system deliberately operates on two backend roles:
-- **`ADMIN`**: Acts as both system administrator and course author/instructor for their organization.
-- **`STUDENT`**: Learner assigned to courses within their organization.
-
-> **Design Rationale**: In modern enterprise LMS environments, administrators frequently author training modules and assign students directly. Rather than introducing duplicate role abstractions, `ADMIN` encompasses full authoring and management privileges.
-
----
-
-## ⚡ Local Quickstart Guide
-
-### 1. Prerequisites
-- Python 3.10+
-- Node.js 18+ & `npm`
-- PostgreSQL 14+ running locally
-
-### 2. Environment Configuration
-
-Copy environment templates:
-```bash
-# Backend .env configuration
+bash
 cp backend/.env.example backend/.env
-```
 
-Ensure `DATABASE_URL` matches your local PostgreSQL credentials in `backend/.env`:
-```env
+Update DATABASE_URL in backend/.env to match your local PostgreSQL setup:
+
+env
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/training_platform
 CORS_ORIGINS=http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173
-```
-
-### 3. Backend Setup & Database Migration
-
-```bash
+3. Backend Setup
+bash
 cd backend
 
-# Create & activate Python virtual environment
+# Create & activate a virtual environment
 python -m venv venv
-.\venv\Scripts\activate  # On Windows
+
+# Windows
+.\venv\Scripts\activate
+
+# macOS/Linux
+source venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
 
-# Run Alembic migrations from fresh PostgreSQL database
+# Set up the database
 alembic upgrade head
 
-# Seed Demonstration Data (Creates published course, quiz, admin & student accounts)
+# Load demo data (sample course, quiz, and test logins)
 python -m app.db.seed
-```
 
-**Seeded Credentials for Local Testing:**
-- **Admin / Instructor**: `admin@edmax.local` / `AdminPass123!`
-- **Student**: `student@edmax.local` / `StudentPass123!`
+Test Accounts (created by the seed script):
 
-### 4. Backend Server Startup
-
-```bash
+Role	Email	Password
+Admin / Instructor	admin@edmax.local	AdminPass123!
+Student	student@edmax.local	StudentPass123!
+4. Start the Backend
+bash
 cd backend
 uvicorn app.main:app --reload --port 8000
-```
-API Documentation available at: `http://localhost:8000/docs`
 
-### 5. Frontend Setup & Startup
+API docs available at http://localhost:8000/docs
 
-```bash
+5. Start the Frontend
+bash
 cd frontend
-
-# Install Node dependencies
 npm install
-
-# Start Vite development server
 npm run dev
-```
-Open application in browser at: `http://localhost:5173`
 
----
+Open http://localhost:5173 in your browser.
 
-## 🧪 Running Automated Test Suites
-
-### Backend Integration Tests (Pytest)
-```bash
+🧪 Running Tests
+Backend (Pytest)
+bash
 cd backend
-.\venv\Scripts\pytest
-```
-
-### Frontend Unit Tests (Vitest)
-```bash
+.\venv\Scripts\pytest   # Windows
+venv/bin/pytest         # macOS/Linux
+Frontend (Vitest)
+bash
 cd frontend
 npm run test
-```
-
-### Frontend Production Build Verification
-```bash
+Frontend Build Check
+bash
 cd frontend
 npm run build
-```
+📜 How People Actually Use It
+If You're an Instructor/Admin
+Log in as Admin (admin@edmax.local).
+Go to the Course Catalog and create a course.
+Add modules, write lesson content (text or video), and build a quiz for each module.
+Assign students to the course from the Learners tab.
+If You're a Student
+Log in as Student (student@edmax.local).
+Find your assigned courses on My Dashboard.
+Go through the lesson content in each module.
+Take the quiz at the end of the module — you need 70% or higher to pass.
+Mark the module complete; your course progress updates.
+Once you finish every module, your certificate is ready to claim.
+Certificates
+See your earned certificates on the Certificates page.
+Click Download PDF for a certificate with your name, course title, score, completion date, and a certificate number.
+Anyone can check that a certificate is real at /verify/{cert_number}.
+📄 License
 
----
-
-## 📜 Workflows & Key Features
-
-### Admin Workflow
-1. Log in as Admin (`admin@edmax.local`).
-2. Navigate to **Course Catalog** to create a course.
-3. Add modules, published text/video content, and create quizzes with multiple-choice options.
-4. Assign learners to courses on the **Learners** tab.
-
-### Student Workflow
-1. Log in as Student (`student@edmax.local`).
-2. Open assigned courses on **My Dashboard**.
-3. Review published text/video training content.
-4. Complete the end-of-module **Quiz** and achieve a passing score (≥ 70%).
-5. Mark module completed to update overall course progress.
-6. Upon 100% course completion, claim the course **Certificate**.
-
-### Certificate & Download Workflow
-1. View earned certificate on the **Certificates** page.
-2. Click **Download PDF** to export a landscape `.pdf` document with student name, course title, final score, completion date, and certificate number.
-3. Authenticate validity publicly using the certificate number at `/verify/{cert_number}`.
+Provided for educational and demonstration purposes. All rights reserved unless otherwise stated.

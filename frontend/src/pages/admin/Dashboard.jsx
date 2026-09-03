@@ -310,20 +310,6 @@ export default function AdminDashboard() {
         </div>
         <div className="sm-header-actions">
           <Link
-            to="/admin/students"
-            className="btn btn-outline"
-            id="manage-users-btn"
-          >
-            👥 User Manager
-          </Link>
-          <Link
-            to="/admin/courses?tab=assign"
-            className="btn btn-outline"
-            id="assign-courses-btn"
-          >
-            📋 Assign Courses
-          </Link>
-          <Link
             to="/admin/courses"
             className="btn btn-primary"
             id="new-course-btn"

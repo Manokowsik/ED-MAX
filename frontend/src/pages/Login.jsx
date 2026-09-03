@@ -169,6 +169,8 @@ function useLoginLogic() {
 // ============================================================================
 
 export default function Login() {
+  const [showPassword, setShowPassword] = useState(false);
+
   const {
     formData,
     formErrors,
@@ -193,7 +195,7 @@ export default function Login() {
             ⚡
           </div>
           <h1 style={STYLES.brandName}>ED-MAX</h1>
-          <p style={STYLES.brandSub}>Employee Training &amp; Learning Platform</p>
+          <p style={STYLES.brandSub}>ED-MAX Learning Platform</p>
         </header>
 
         {/* Form Container */}
@@ -248,7 +250,7 @@ export default function Login() {
             {formErrors.email && <div id="email-error" className="form-error" role="alert">{formErrors.email}</div>}
           </div>
 
-          {/* Password Input */}
+          {/* Password Input with Eye Toggle Icon */}
           <div className="form-group">
             <div className="flex justify-between items-center mb-1">
               <label className="form-label" htmlFor="password" style={{ margin: 0 }}>Password</label>
@@ -256,20 +258,46 @@ export default function Login() {
                 Forgot password?
               </Link>
             </div>
-            <input
-              id="password"
-              name="password"
-              type="password"
-              className={`form-input ${formErrors.password ? 'error' : ''}`}
-              placeholder="Enter your password"
-              value={formData.password}
-              onChange={handleChange}
-              autoComplete="current-password"
-              required
-              disabled={loading}
-              aria-invalid={!!formErrors.password}
-              aria-describedby={formErrors.password ? "password-error" : undefined}
-            />
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <input
+                id="password"
+                name="password"
+                type={showPassword ? 'text' : 'password'}
+                className={`form-input ${formErrors.password ? 'error' : ''}`}
+                placeholder="Enter your password"
+                value={formData.password}
+                onChange={handleChange}
+                autoComplete="current-password"
+                required
+                disabled={loading}
+                aria-invalid={!!formErrors.password}
+                aria-describedby={formErrors.password ? "password-error" : undefined}
+                style={{ paddingRight: '2.5rem' }}
+              />
+              <button
+                type="button"
+                className="password-toggle-btn"
+                onClick={() => setShowPassword((prev) => !prev)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                title={showPassword ? "Hide password" : "Show password"}
+                id="password-eye-toggle-btn"
+                style={{
+                  position: 'absolute',
+                  right: '0.75rem',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '1rem',
+                  color: 'var(--gray-500)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '4px',
+                }}
+              >
+                {showPassword ? '👁️' : '🙈'}
+              </button>
+            </div>
             {formErrors.password && <div id="password-error" className="form-error" role="alert">{formErrors.password}</div>}
           </div>
 

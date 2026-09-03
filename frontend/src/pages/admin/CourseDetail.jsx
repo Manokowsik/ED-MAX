@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import AdminLayout from '../../layouts/AdminLayout';
 import {
   getCourse,
   updateCourse,
-  createModule,
   updateModule,
   deleteModule,
 } from '../../services/api';
@@ -17,199 +16,219 @@ import {
   ConfirmModal,
   Spinner,
 } from '../../components/ui';
+import ModuleWizardModal from '../../components/lms/ModuleWizardModal';
 
 // ============================================================================
-// CONSTANTS & CONFIGURATION
+// CONSTANTS
 // ============================================================================
 
 const TABS = Object.freeze({
-  MODULES: 'modules',
+  OUTLINE: 'outline',
   STUDENTS: 'students',
 });
 
 const MESSAGES = Object.freeze({
   LOAD_FAILED: 'Failed to load course details.',
   COURSE_UPDATED: 'Course details updated successfully.',
-  COURSE_UPDATE_FAILED: 'Failed to update course details.',
-  MODULE_REORDER_FAILED: 'Failed to update module order. Reverting changes.',
-  MODULE_CREATE_FAILED: 'Failed to create module.',
-  MODULE_DELETE_FAILED: 'Failed to delete module.',
+  MODULE_DELETED: 'Module deleted successfully.',
+  MODULE_REORDER_FAILED: 'Failed to update module order.',
   TITLE_REQUIRED: 'Course title is required.',
-  MODULE_TITLE_REQUIRED: 'Module title is required.',
 });
-
-// ============================================================================
-// UTILITIES
-// ============================================================================
-
-/**
- * Pure date formatter with fallback.
- * @param {string | null | undefined} isoDate 
- * @returns {string}
- */
-const formatDate = (isoDate) => {
-  if (!isoDate) return '—';
-  try {
-    return new Date(isoDate).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  } catch {
-    return '—';
-  }
-};
-
-/**
- * Maps student enrollment status to UI Badge variants.
- * @param {string} status 
- * @returns {'success' | 'info' | 'gray'}
- */
-const getStatusBadgeVariant = (status) => {
-  switch (status) {
-    case 'COMPLETED':
-      return 'success';
-    case 'IN_PROGRESS':
-      return 'info';
-    default:
-      return 'gray';
-  }
-};
 
 // ============================================================================
 // SUB-COMPONENT: Module Card Item
 // ============================================================================
 
-const ModuleCard = React.memo(function ModuleCard({
+const ModuleCard = function ModuleCard({
   module,
-  courseId,
-  onRefresh,
-  onError,
   isFirst,
   isLast,
+  courseId,
   onMoveUp,
   onMoveDown,
+  onRefresh,
+  onError,
 }) {
   const navigate = useNavigate();
+  const [togglingPublish, setTogglingPublish] = useState(false);
   const [confirmDeleteMod, setConfirmDeleteMod] = useState(false);
   const [deletingMod, setDeletingMod] = useState(false);
 
-  const handleDeleteModule = useCallback(async () => {
+  const handleDeleteModule = async () => {
     setDeletingMod(true);
     try {
       await deleteModule(module.id);
       setConfirmDeleteMod(false);
       onRefresh();
     } catch (err) {
-      onError(err.message || MESSAGES.MODULE_DELETE_FAILED);
+      onError(err.message || 'Failed to delete module.');
       setConfirmDeleteMod(false);
     } finally {
       setDeletingMod(false);
     }
-  }, [module.id, onRefresh, onError]);
+  };
 
-  const contentCount = module.contents?.length ?? 0;
+  const handleTogglePublish = useCallback(async () => {
+    setTogglingPublish(true);
+    try {
+      await updateModule(module.id, { isPublished: !module.is_published });
+      onRefresh();
+    } catch (err) {
+      onError(err.message || 'Failed to update publish status.');
+    } finally {
+      setTogglingPublish(false);
+    }
+  }, [module.id, module.is_published, onRefresh, onError]);
+
+  const contents = module.contents ?? [];
+  const textLessonsCount = contents.filter((c) => c.content_type === 'TEXT').length;
+  const videoCount = contents.filter((c) => c.content_type === 'VIDEO').length;
+  const resourceCount = contents.filter((c) => c.content_type === 'EMBED').length;
+
   const primaryQuiz = module.quizzes?.[0] ?? null;
   const questionCount = primaryQuiz?.questions?.length ?? 0;
 
   return (
-    <div className="module-card">
-      <div style={STYLES.orderControlColumn}>
-        <div className="module-card-number">
-          {String(module.module_order).padStart(2, '0')}
-        </div>
-        <div style={STYLES.orderButtonsRow}>
-          <button
-            type="button"
-            className="content-reorder-btn"
-            onClick={onMoveUp}
-            disabled={isFirst}
-            title="Move Module Up"
-            aria-label={`Move ${module.title} up`}
-            style={STYLES.reorderButton}
-          >
-            ▲
-          </button>
-          <button
-            type="button"
-            className="content-reorder-btn"
-            onClick={onMoveDown}
-            disabled={isLast}
-            title="Move Module Down"
-            aria-label={`Move ${module.title} down`}
-            style={STYLES.reorderButton}
-          >
-            ▼
-          </button>
-        </div>
-      </div>
+    <div
+      className="card mb-4"
+      style={{
+        border: '1px solid var(--gray-200)',
+        borderRadius: '12px',
+        background: '#ffffff',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
+      }}
+      id={`module-card-${module.id}`}
+    >
+      <div className="card-body p-5">
+        <div className="flex items-start justify-between gap-4 flex-wrap md:flex-nowrap">
+          {/* Left: Reorder & Module Number */}
+          <div className="flex items-center gap-3">
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 46,
+                height: 48,
+                background: '#f1f5f9',
+                borderRadius: '8px',
+                fontWeight: 800,
+                color: '#4f46e5',
+                fontSize: '1rem',
+                flexShrink: 0,
+              }}
+            >
+              #{String(module.module_order).padStart(2, '0')}
+            </div>
 
-      <div className="module-card-body">
-        <div className="module-card-title-row">
-          <span className="module-card-title">{module.title}</span>
-          <Badge variant={module.is_published ? 'success' : 'gray'}>
-            {module.is_published ? '✓ Published' : 'Draft'}
-          </Badge>
-        </div>
+            <div className="flex flex-col gap-1 flex-shrink-0">
+              <button
+                type="button"
+                className="btn btn-ghost btn-xs"
+                onClick={onMoveUp}
+                disabled={isFirst}
+                title="Move Module Up"
+                style={{ padding: '0 4px', lineHeight: 1, minHeight: 'auto' }}
+              >
+                ▲
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-xs"
+                onClick={onMoveDown}
+                disabled={isLast}
+                title="Move Module Down"
+                style={{ padding: '0 4px', lineHeight: 1, minHeight: 'auto' }}
+              >
+                ▼
+              </button>
+            </div>
+          </div>
 
-        {module.description ? (
-          <p className="text-xs text-gray mt-1 truncate" style={STYLES.description}>
-            {module.description}
-          </p>
-        ) : (
-          <p className="text-xs text-gray mt-1 italic">No description provided</p>
-        )}
+          {/* Middle: Title, Description, and Breakdown */}
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <div className="flex items-center gap-3 mb-1 flex-wrap">
+              <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: 'var(--gray-900)' }}>
+                {module.title}
+              </h3>
+              <Badge variant={module.is_published ? 'success' : 'gray'}>
+                {module.is_published ? '✓ Published' : 'Draft'}
+              </Badge>
+              <button
+                type="button"
+                className="btn btn-ghost btn-xs text-xs"
+                onClick={handleTogglePublish}
+                disabled={togglingPublish}
+                style={{ color: module.is_published ? 'var(--gray-600)' : 'var(--success)' }}
+              >
+                {togglingPublish ? <Spinner /> : module.is_published ? 'Unpublish' : '🚀 Publish'}
+              </button>
+            </div>
 
-        <div className="module-card-meta">
-          <span className="module-card-meta-item">
-            📄 <strong>{contentCount}</strong> {contentCount === 1 ? 'lesson' : 'lessons'}
-          </span>
-
-          <span className="module-card-meta-item">
-            📝{' '}
-            {primaryQuiz ? (
-              <span className="text-primary font-semibold">
-                Quiz configured ({questionCount}{' '}
-                {questionCount === 1 ? 'question' : 'questions'}, Pass:{' '}
-                {primaryQuiz.passing_score}%)
-              </span>
+            {module.description ? (
+              <p className="text-xs text-gray mb-3" style={{ maxWidth: 640, margin: '4px 0 12px 0' }}>
+                {module.description}
+              </p>
             ) : (
-              <span className="text-gray italic">Quiz not configured</span>
+              <p className="text-xs text-gray mb-3 italic" style={{ margin: '4px 0 12px 0' }}>
+                No description provided
+              </p>
             )}
-          </span>
 
-          {module.updated_at && (
-            <span className="module-card-meta-item">
-              🕒 Updated {formatDate(module.updated_at)}
-            </span>
-          )}
+            {/* Structure Summary Pills */}
+            <div className="flex items-center gap-2 flex-wrap text-xs">
+              <span className="badge badge-gray" style={{ fontWeight: 600 }}>
+                📄 {textLessonsCount} Lesson{textLessonsCount !== 1 ? 's' : ''}
+              </span>
+              {videoCount > 0 && (
+                <span className="badge badge-primary" style={{ fontWeight: 600 }}>
+                  🎥 {videoCount} Video{videoCount !== 1 ? 's' : ''}
+                </span>
+              )}
+              {resourceCount > 0 && (
+                <span className="badge badge-gray" style={{ fontWeight: 600 }}>
+                  📁 {resourceCount} Resource{resourceCount !== 1 ? 's' : ''}
+                </span>
+              )}
+              {primaryQuiz ? (
+                <span className="badge badge-success" style={{ fontWeight: 600 }}>
+                  📝 Quiz ({questionCount} Qs, Pass: {primaryQuiz.passing_score}%)
+                </span>
+              ) : (
+                <span className="badge badge-gray" style={{ fontStyle: 'italic' }}>
+                  📝 No Quiz
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Right Actions */}
+          <div className="flex items-center gap-2 flex-wrap justify-end flex-shrink-0">
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => navigate(`/admin/courses/${courseId}/modules/${module.id}`)}
+              id={`edit-module-btn-${module.id}`}
+            >
+              ✏️ Edit Module
+            </button>
+
+            <button
+              type="button"
+              className="btn btn-outline btn-sm text-danger"
+              onClick={() => setConfirmDeleteMod(true)}
+              id={`delete-module-btn-${module.id}`}
+            >
+              🗑
+            </button>
+          </div>
         </div>
-      </div>
-
-      <div className="module-card-actions">
-        <button
-          type="button"
-          className="btn btn-primary btn-sm"
-          onClick={() => navigate(`/admin/courses/${courseId}/modules/${module.id}`)}
-          id={`edit-module-btn-${module.id}`}
-        >
-          ✏️ Edit Module
-        </button>
-
-        <button
-          type="button"
-          className="btn btn-outline btn-sm text-danger"
-          onClick={() => setConfirmDeleteMod(true)}
-          id={`delete-module-btn-${module.id}`}
-        >
-          Delete
-        </button>
       </div>
 
       {confirmDeleteMod && (
         <ConfirmModal
           title="Delete Module"
-          message={`Are you sure you want to delete "${module.title}"? Note: Dependent content and quizzes must be removed first.`}
+          message={`Are you sure you want to delete "${module.title}"? Note: Dependent content and quizzes will be removed.`}
           onConfirm={handleDeleteModule}
           onCancel={() => setConfirmDeleteMod(false)}
           danger
@@ -218,13 +237,13 @@ const ModuleCard = React.memo(function ModuleCard({
       )}
     </div>
   );
-});
+};
 
 // ============================================================================
-// SUB-COMPONENT: Edit Course Modal
+// SUB-COMPONENT: Edit Course Details Modal
 // ============================================================================
 
-const EditCourseModal = React.memo(function EditCourseModal({
+const EditCourseModal = function EditCourseModal({
   course,
   isOpen,
   onClose,
@@ -268,7 +287,7 @@ const EditCourseModal = React.memo(function EditCourseModal({
       });
       onClose();
     } catch (err) {
-      setError(err.message || MESSAGES.COURSE_UPDATE_FAILED);
+      setError(err.message || 'Failed to update course details.');
     } finally {
       setSubmitting(false);
     }
@@ -331,159 +350,25 @@ const EditCourseModal = React.memo(function EditCourseModal({
           />
         </div>
 
-        <div className="form-group" style={STYLES.checkboxRow}>
+        <div className="form-group flex items-center gap-2">
           <input
             id="edit-c-active"
             type="checkbox"
             checked={form.isActive}
             onChange={(e) => setForm((f) => ({ ...f, isActive: e.target.checked }))}
-            style={STYLES.checkboxInput}
             disabled={submitting}
           />
-          <label
-            className="form-label"
-            htmlFor="edit-c-active"
-            style={STYLES.checkboxLabel}
-          >
-            Active Course (available for student assignments)
+          <label className="form-label mb-0 cursor-pointer" htmlFor="edit-c-active">
+            Active Course (visible for student assignments)
           </label>
         </div>
       </form>
     </Modal>
   );
-});
+};
 
 // ============================================================================
-// SUB-COMPONENT: Add Module Modal
-// ============================================================================
-
-const AddModuleModal = React.memo(function AddModuleModal({
-  isOpen,
-  defaultOrder,
-  onClose,
-  onCreate,
-}) {
-  const [form, setForm] = useState({
-    title: '',
-    description: '',
-    order: defaultOrder,
-  });
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (isOpen) {
-      setForm({ title: '', description: '', order: defaultOrder });
-      setError('');
-    }
-  }, [isOpen, defaultOrder]);
-
-  if (!isOpen) return null;
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!form.title.trim()) {
-      setError(MESSAGES.MODULE_TITLE_REQUIRED);
-      return;
-    }
-
-    setSubmitting(true);
-    setError('');
-    try {
-      await onCreate({
-        title: form.title.trim(),
-        description: form.description.trim(),
-        order: Number(form.order) || 1,
-      });
-      onClose();
-    } catch (err) {
-      setError(err.message || MESSAGES.MODULE_CREATE_FAILED);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <Modal
-      title="Add New Module"
-      onClose={onClose}
-      footer={
-        <>
-          <button
-            type="button"
-            className="btn btn-outline"
-            onClick={onClose}
-            disabled={submitting}
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            className="btn btn-primary"
-            form="add-module-form"
-            disabled={submitting}
-            id="submit-add-module-btn"
-          >
-            {submitting ? <Spinner /> : 'Create & Edit Module'}
-          </button>
-        </>
-      }
-    >
-      {error && <Alert type="error">{error}</Alert>}
-      <form id="add-module-form" onSubmit={handleSubmit} noValidate>
-        <div className="form-group">
-          <label className="form-label" htmlFor="m-title">
-            Module Title *
-          </label>
-          <input
-            id="m-title"
-            type="text"
-            className="form-input"
-            value={form.title}
-            onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-            placeholder="e.g. Introduction to Architecture"
-            required
-            disabled={submitting}
-          />
-        </div>
-
-        <div className="form-group">
-          <label className="form-label" htmlFor="m-desc">
-            Description
-          </label>
-          <textarea
-            id="m-desc"
-            className="form-textarea"
-            rows={3}
-            value={form.description}
-            onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-            disabled={submitting}
-          />
-        </div>
-
-        <div className="form-group">
-          <label className="form-label" htmlFor="m-order">
-            Module Order
-          </label>
-          <input
-            id="m-order"
-            type="number"
-            className="form-input"
-            value={form.order}
-            onChange={(e) => setForm((f) => ({ ...f, order: Number(e.target.value) }))}
-            min={1}
-            style={STYLES.orderInput}
-            required
-            disabled={submitting}
-          />
-        </div>
-      </form>
-    </Modal>
-  );
-});
-
-// ============================================================================
-// MAIN PAGE COMPONENT
+// MAIN PAGE COMPONENT: Central Course Authoring Control Panel
 // ============================================================================
 
 export default function AdminCourseDetail() {
@@ -494,13 +379,12 @@ export default function AdminCourseDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [mainTab, setMainTab] = useState(TABS.MODULES);
+  const [mainTab, setMainTab] = useState(TABS.OUTLINE);
 
   // Modals Visibility
   const [showEdit, setShowEdit] = useState(false);
   const [showAddModule, setShowAddModule] = useState(false);
 
-  // Synchronize Course Details
   const loadCourse = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -518,7 +402,6 @@ export default function AdminCourseDetail() {
     loadCourse();
   }, [loadCourse]);
 
-  // Memoized Sorted Modules (Prevents inline sorting on every tick)
   const sortedModules = useMemo(() => {
     if (!course?.modules) return [];
     return [...course.modules].sort(
@@ -526,7 +409,23 @@ export default function AdminCourseDetail() {
     );
   }, [course?.modules]);
 
-  // Handle Edit Course Update
+  // Aggregate Course Metrics
+  const metrics = useMemo(() => {
+    const mods = sortedModules;
+    const totalMods = mods.length;
+    const publishedMods = mods.filter((m) => m.is_published).length;
+    let totalLessons = 0;
+    mods.forEach((m) => {
+      totalLessons += m.contents?.length ?? 0;
+    });
+    return {
+      totalMods,
+      publishedMods,
+      totalLessons,
+      enrolledCount: course?.students?.length ?? 0,
+    };
+  }, [sortedModules, course?.students]);
+
   const handleUpdateCourseDetails = useCallback(
     async ({ title, description, isActive }) => {
       await updateCourse(Number(courseId), title, description, isActive);
@@ -536,17 +435,6 @@ export default function AdminCourseDetail() {
     [courseId, loadCourse]
   );
 
-  // Handle Create Module & Navigate
-  const handleCreateModule = useCallback(
-    async ({ title, description, order }) => {
-      const res = await createModule(Number(courseId), title, description, order);
-      const newModuleId = res.module.id;
-      navigate(`/admin/courses/${courseId}/modules/${newModuleId}`);
-    },
-    [courseId, navigate]
-  );
-
-  // Module Reorder with Optimistic State Swap
   const handleMoveModule = useCallback(
     async (moduleItem, direction) => {
       const currIdx = sortedModules.findIndex((m) => m.id === moduleItem.id);
@@ -556,7 +444,6 @@ export default function AdminCourseDetail() {
       const targetItem = sortedModules[targetIdx];
       const prevModulesState = [...sortedModules];
 
-      // Optimistic Swap
       const newCurrOrder = targetItem.module_order;
       const newTargetOrder = moduleItem.module_order;
 
@@ -576,7 +463,6 @@ export default function AdminCourseDetail() {
           updateModule(targetItem.id, { moduleOrder: newTargetOrder }),
         ]);
       } catch (err) {
-        // Rollback on failure
         setCourse((prev) => (prev ? { ...prev, modules: prevModulesState } : prev));
         setError(err.message || MESSAGES.MODULE_REORDER_FAILED);
       }
@@ -588,13 +474,13 @@ export default function AdminCourseDetail() {
     return (
       <AdminLayout>
         <div className="page-container">
-          <LoadingPage message="Loading course modules…" />
+          <LoadingPage message="Loading course workspace…" />
         </div>
       </AdminLayout>
     );
   }
 
-  if (!course) {
+  if (error && !course) {
     return (
       <AdminLayout>
         <div className="page-container">
@@ -611,71 +497,135 @@ export default function AdminCourseDetail() {
 
   return (
     <AdminLayout>
-      <div className="page-container">
+      <div className="page-container" style={{ maxWidth: 1100, margin: '0 auto' }}>
         {/* Navigation Breadcrumb */}
         <nav className="mb-4" aria-label="Breadcrumb">
-          <Link to="/admin/courses" className="text-gray text-sm">
+          <Link to="/admin/courses" className="text-gray text-sm hover:text-primary">
             ← Back to Courses
           </Link>
         </nav>
 
-        {/* Page Header */}
-        <header className="page-header-row mb-6">
-          <div>
-            <div className="flex items-center gap-3 mb-1">
-              <h1 className="page-title">{course.title}</h1>
-              <Badge variant={course.is_active ? 'success' : 'gray'}>
-                {course.is_active ? 'Active' : 'Inactive'}
-              </Badge>
+        {/* Course Workspace Header Banner */}
+        <div
+          className="card mb-6"
+          style={{
+            background: 'linear-gradient(135deg, #1e1b4b 0%, #312e81 100%)',
+            color: '#ffffff',
+            borderRadius: '16px',
+            boxShadow: '0 8px 24px rgba(30, 27, 75, 0.25)',
+            overflow: 'hidden',
+          }}
+        >
+          <div className="card-body" style={{ padding: '1.75rem 2rem' }}>
+            <div className="flex items-start justify-between gap-4 flex-wrap md:flex-nowrap">
+              <div>
+                <div className="flex items-center gap-3 mb-2 flex-wrap">
+                  <h1 style={{ fontSize: '1.75rem', fontWeight: 800, color: '#ffffff', margin: 0, lineHeight: 1.2 }}>
+                    {course.title}
+                  </h1>
+                  <Badge variant={course.is_active ? 'success' : 'gray'}>
+                    {course.is_active ? 'Active Course' : 'Inactive'}
+                  </Badge>
+                </div>
+                <p className="text-sm" style={{ color: '#c7d2fe', maxWidth: 680, margin: '6px 0 0 0', lineHeight: 1.5 }}>
+                  {course.description || 'No course description provided.'}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3 flex-shrink-0">
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  style={{ background: 'rgba(255,255,255,0.15)', color: '#ffffff', border: '1px solid rgba(255,255,255,0.3)' }}
+                  onClick={() => setShowEdit(true)}
+                  id="edit-course-details-btn"
+                >
+                  ✏️ Edit Details
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={() => setShowAddModule(true)}
+                  id="add-module-header-btn"
+                >
+                  + Add Module
+                </button>
+              </div>
             </div>
-            <p className="page-subtitle">
-              {course.description || 'No course description'}
-            </p>
-          </div>
 
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              className="btn btn-outline"
-              onClick={() => setShowEdit(true)}
-              id="edit-course-details-btn"
+            {/* Clean 4-Column Stat Cards Row */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                gap: '1rem',
+                marginTop: '1.5rem',
+                paddingTop: '1.25rem',
+                borderTop: '1px solid rgba(255, 255, 255, 0.15)',
+              }}
             >
-              ✏️ Edit Course Details
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => setShowAddModule(true)}
-              id="add-module-header-btn"
-            >
-              + Add Module
-            </button>
-          </div>
-        </header>
+              <div style={{ background: 'rgba(255, 255, 255, 0.08)', borderRadius: '12px', padding: '0.875rem 1.25rem', border: '1px solid rgba(255, 255, 255, 0.12)' }}>
+                <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#a5b4fc', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Total Modules
+                </div>
+                <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#ffffff', marginTop: '0.25rem' }}>
+                  {metrics.totalMods}
+                </div>
+              </div>
 
-        {/* Dynamic Alerts */}
+              <div style={{ background: 'rgba(255, 255, 255, 0.08)', borderRadius: '12px', padding: '0.875rem 1.25rem', border: '1px solid rgba(255, 255, 255, 0.12)' }}>
+                <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#a5b4fc', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Published Status
+                </div>
+                <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#ffffff', marginTop: '0.25rem' }}>
+                  {metrics.publishedMods} / {metrics.totalMods}
+                </div>
+              </div>
+
+              <div style={{ background: 'rgba(255, 255, 255, 0.08)', borderRadius: '12px', padding: '0.875rem 1.25rem', border: '1px solid rgba(255, 255, 255, 0.12)' }}>
+                <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#a5b4fc', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Content Lessons
+                </div>
+                <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#ffffff', marginTop: '0.25rem' }}>
+                  {metrics.totalLessons}
+                </div>
+              </div>
+
+              <div style={{ background: 'rgba(255, 255, 255, 0.08)', borderRadius: '12px', padding: '0.875rem 1.25rem', border: '1px solid rgba(255, 255, 255, 0.12)' }}>
+                <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#a5b4fc', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Enrolled Learners
+                </div>
+                <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#ffffff', marginTop: '0.25rem' }}>
+                  {metrics.enrolledCount}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Alerts */}
         {error && (
-          <Alert type="error" onClose={() => setError('')} aria-live="assertive">
+          <Alert type="error" onClose={() => setError('')}>
             {error}
           </Alert>
         )}
         {success && (
-          <Alert type="success" onClose={() => setSuccess('')} aria-live="polite">
+          <Alert type="success" onClose={() => setSuccess('')}>
             {success}
           </Alert>
         )}
 
-        {/* Main Tabs */}
-        <div className="tabs" role="tablist">
+        {/* Workspace Tabs */}
+        <div className="tabs mb-6" role="tablist" style={{ marginBottom: '1.5rem' }}>
           <button
             type="button"
             role="tab"
-            aria-selected={mainTab === TABS.MODULES}
-            className={`tab-btn${mainTab === TABS.MODULES ? ' active' : ''}`}
-            onClick={() => setMainTab(TABS.MODULES)}
+            aria-selected={mainTab === TABS.OUTLINE}
+            className={`tab-btn${mainTab === TABS.OUTLINE ? ' active' : ''}`}
+            onClick={() => setMainTab(TABS.OUTLINE)}
             id="tab-modules-builder"
           >
-            📦 Course Modules ({sortedModules.length})
+            📚 Course Outline &amp; Modules ({sortedModules.length})
           </button>
           <button
             type="button"
@@ -683,43 +633,66 @@ export default function AdminCourseDetail() {
             aria-selected={mainTab === TABS.STUDENTS}
             className={`tab-btn${mainTab === TABS.STUDENTS ? ' active' : ''}`}
             onClick={() => setMainTab(TABS.STUDENTS)}
-            id="tab-enrolled-students"
+            id="tab-enrolled-learners"
           >
             👥 Enrolled Students ({enrolledStudents.length})
           </button>
         </div>
 
-        {/* Modules Builder View */}
-        {mainTab === TABS.MODULES && (
-          <section aria-labelledby="tab-modules-builder">
+        {/* TAB 1: MODULE OUTLINE */}
+        {mainTab === TABS.OUTLINE && (
+          <section aria-label="Course Modules Outline">
+            <div className="flex items-center justify-between gap-4 mb-4 flex-wrap">
+              <div>
+                <h2 className="text-lg font-bold" style={{ margin: 0, color: 'var(--gray-900)' }}>
+                  Course Modules Structure
+                </h2>
+                <p className="text-xs text-gray" style={{ margin: '2px 0 0 0' }}>
+                  Organize and order your modules. Click &quot;Edit Module&quot; to edit content lessons and quizzes.
+                </p>
+              </div>
+
+              {sortedModules.length > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={() => setShowAddModule(true)}
+                  id="add-module-outline-btn"
+                >
+                  + Add Module
+                </button>
+              )}
+            </div>
+
             {sortedModules.length === 0 ? (
               <EmptyState
                 icon="📦"
                 title="No Modules in this Course"
-                text="Create modules to structure your course with content lessons and quizzes."
+                text="Create your first module to structure your course with content lessons and quizzes."
                 action={
                   <button
                     type="button"
                     className="btn btn-primary"
                     onClick={() => setShowAddModule(true)}
+                    id="add-first-module-btn"
                   >
                     + Add First Module
                   </button>
                 }
               />
             ) : (
-              <div className="module-card-list">
-                {sortedModules.map((moduleItem, idx) => (
+              <div className="flex flex-col gap-3">
+                {sortedModules.map((module, idx) => (
                   <ModuleCard
-                    key={moduleItem.id}
-                    module={moduleItem}
-                    courseId={course.id}
-                    onRefresh={loadCourse}
-                    onError={setError}
+                    key={module.id}
+                    module={module}
                     isFirst={idx === 0}
                     isLast={idx === sortedModules.length - 1}
-                    onMoveUp={() => handleMoveModule(moduleItem, 'up')}
-                    onMoveDown={() => handleMoveModule(moduleItem, 'down')}
+                    courseId={courseId}
+                    onMoveUp={() => handleMoveModule(module, 'up')}
+                    onMoveDown={() => handleMoveModule(module, 'down')}
+                    onRefresh={loadCourse}
+                    onError={(msg) => setError(msg)}
                   />
                 ))}
               </div>
@@ -727,57 +700,52 @@ export default function AdminCourseDetail() {
           </section>
         )}
 
-        {/* Enrolled Students View */}
+        {/* TAB 2: ENROLLED STUDENTS */}
         {mainTab === TABS.STUDENTS && (
-          <section aria-labelledby="tab-enrolled-students">
-            <div className="card">
-              <div className="card-header flex justify-between items-center">
-                <h2 className="card-title">
-                  Enrolled Students ({enrolledStudents.length})
-                </h2>
-                <Link to="/admin/assignments" className="btn btn-outline btn-sm">
-                  Assign Students
-                </Link>
-              </div>
+          <section aria-label="Enrolled Students List">
+            <div className="card p-6" style={{ background: '#ffffff', borderRadius: '12px' }}>
+              <h2 className="text-lg font-bold mb-1" style={{ color: 'var(--gray-900)' }}>
+                Enrolled Learners ({enrolledStudents.length})
+              </h2>
+              <p className="text-xs text-gray mb-4">
+                Students currently assigned to study this course.
+              </p>
+
               {enrolledStudents.length === 0 ? (
-                <div className="card-body">
-                  <EmptyState
-                    icon="👥"
-                    title="No Students Enrolled"
-                    text="Assign students to this course using the Assignments menu."
-                  />
-                </div>
+                <EmptyState
+                  icon="👥"
+                  title="No Students Enrolled"
+                  text="Assign students to this course from the Manage Courses -> Assign tab or Student Manager."
+                  action={
+                    <Link to="/admin/courses?tab=assign" className="btn btn-outline btn-sm">
+                      Assign Students Now
+                    </Link>
+                  }
+                />
               ) : (
-                <div className="table-wrapper" style={STYLES.tableWrapper}>
-                  <table>
+                <div className="table-responsive">
+                  <table className="table">
                     <thead>
                       <tr>
-                        <th scope="col">Student Name</th>
-                        <th scope="col">Email</th>
-                        <th scope="col">Status</th>
-                        <th scope="col">Assigned Date</th>
-                        <th scope="col">Completed Date</th>
+                        <th>Learner Name</th>
+                        <th>Email</th>
+                        <th>Status</th>
+                        <th>Joined Date</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {enrolledStudents.map((s) => (
-                        <tr key={s.student_id}>
+                      {enrolledStudents.map((st) => (
+                        <tr key={st.id}>
+                          <td className="font-bold text-sm">{st.name}</td>
+                          <td className="text-xs text-gray">{st.email}</td>
                           <td>
-                            <Link
-                              to={`/admin/students/${s.student_id}`}
-                              style={STYLES.studentLink}
-                            >
-                              {s.student_name}
-                            </Link>
-                          </td>
-                          <td className="text-gray">{s.email}</td>
-                          <td>
-                            <Badge variant={getStatusBadgeVariant(s.status)}>
-                              {s.status}
+                            <Badge variant={st.is_active ? 'success' : 'gray'}>
+                              {st.is_active ? 'Active' : 'Inactive'}
                             </Badge>
                           </td>
-                          <td className="text-gray">{formatDate(s.assigned_at)}</td>
-                          <td className="text-gray">{formatDate(s.completed_at)}</td>
+                          <td className="text-xs text-gray">
+                            {st.created_at ? new Date(st.created_at).toLocaleDateString() : '—'}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -788,7 +756,7 @@ export default function AdminCourseDetail() {
           </section>
         )}
 
-        {/* Edit Modal Component */}
+        {/* Modals */}
         <EditCourseModal
           course={course}
           isOpen={showEdit}
@@ -796,63 +764,22 @@ export default function AdminCourseDetail() {
           onSave={handleUpdateCourseDetails}
         />
 
-        {/* Add Module Modal Component */}
-        <AddModuleModal
-          isOpen={showAddModule}
-          defaultOrder={sortedModules.length + 1}
-          onClose={() => setShowAddModule(false)}
-          onCreate={handleCreateModule}
-        />
+        {showAddModule && (
+          <ModuleWizardModal
+            isOpen={showAddModule}
+            courseId={courseId}
+            defaultOrder={sortedModules.length + 1}
+            onClose={() => setShowAddModule(false)}
+            onCreated={() => {
+              setSuccess('Module created successfully.');
+              loadCourse();
+            }}
+            onNavigateToEditor={(newMod) => {
+              navigate(`/admin/courses/${courseId}/modules/${newMod.id}`);
+            }}
+          />
+        )}
       </div>
     </AdminLayout>
   );
 }
-
-// ============================================================================
-// STYLES (Frozen for performance and memory optimization)
-// ============================================================================
-
-const STYLES = Object.freeze({
-  orderControlColumn: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: '4px',
-  },
-  orderButtonsRow: {
-    display: 'flex',
-    gap: '2px',
-  },
-  reorderButton: {
-    fontSize: '0.75rem',
-    padding: '2px 4px',
-  },
-  description: {
-    maxWidth: '640px',
-  },
-  tableWrapper: {
-    border: 'none',
-  },
-  studentLink: {
-    color: 'var(--primary)',
-    fontWeight: 600,
-  },
-  checkboxRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    marginTop: '12px',
-  },
-  checkboxInput: {
-    width: '18px',
-    height: '18px',
-    cursor: 'pointer',
-  },
-  checkboxLabel: {
-    marginBottom: 0,
-    cursor: 'pointer',
-  },
-  orderInput: {
-    width: '100px',
-  },
-});
